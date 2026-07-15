@@ -91,13 +91,34 @@ SQLite persists to `./data/ideal.sqlite`, logs to `./data/ideal.log`. The proces
 survives your SSH session (it's `nohup`ed); to restart it automatically after a VM
 reboot without root, add a user crontab line: `@reboot cd /path/to/IdeaL && ./scripts/run.sh start`.
 
-Then **open `IDEAL_PORT` (default 8000) in the VM's firewall / security group** so the
-machine running Claude Code can reach it.
+### Reaching the server from another machine
+
+The client needs to reach `IDEAL_PORT` (default 8000) on the VM. Two options:
+
+**SSH tunnel (recommended — no firewall changes, no root, encrypted).** If you can
+SSH to the VM, forward the port from the machine running Claude Code:
+
+```sh
+ssh -N -L 8000:127.0.0.1:8000 <user>@<vm-ip>
+# then point the client at the tunnel:  /ideal-setup  ->  http://127.0.0.1:8000
+```
+
+This keeps the plain-HTTP, token-only endpoint off the public internet.
+
+**Open the port (public access).** Allow `IDEAL_PORT` in *every* firewall layer:
+- Host firewall, e.g. `ufw`:  `sudo ufw allow 8000/tcp`  (needs root; check with `systemctl is-active ufw`).
+- Cloud firewall (DigitalOcean/AWS/GCP security group): add an inbound TCP rule for the port in the provider console.
+
+Diagnosing a block: from *outside*, a **timeout** on the port means a firewall is
+dropping packets (vs. "connection refused" = nothing listening). On the VM,
+`curl http://127.0.0.1:8000/health` proves the app is fine; `ss -tlnp | grep 8000`
+should show `0.0.0.0:8000`.
 
 **Security note.** The bearer token is the *only* access control, and traffic is plain
-HTTP. That's acceptable on a trusted network. If the VM is exposed to the internet, put
-it behind TLS (a reverse proxy) or a tunnel — out of scope for v1. Reads require the
-token by default (`IDEAL_PROTECT_READS=true`), since `/export` dumps the whole store.
+HTTP. That's acceptable on a trusted network or through the SSH tunnel above. If you
+expose the port to the internet, put it behind TLS (a reverse proxy) — out of scope
+for v1. Reads require the token by default (`IDEAL_PROTECT_READS=true`), since
+`/export` dumps the whole store.
 
 Local dev (no Docker):
 
