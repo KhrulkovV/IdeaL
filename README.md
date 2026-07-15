@@ -31,6 +31,27 @@ schema makes room to populate them later.
 
 ---
 
+## Quickstart — join an existing store (teammates)
+
+If a colleague already runs an IdeaL server and has given you its **URL**, the shared
+**token**, and told you to pick an **author name**, the plugin is all you install:
+
+```
+/plugin marketplace add KhrulkovV/IdeaL   # this public repo — no clone needed
+/plugin install ideal
+/ideal-setup                              # paste the URL + token, set your author name
+```
+
+Then just talk to Claude: "save this to IdeaL", "what's stored about X?", "this idea
+is solid". The plugin is a pure client (Python standard library only — no pip, curl,
+or jq), so there is nothing else to set up.
+
+The URL and token come from whoever runs the store and are shared privately — they are
+**not** in this repo. `/ideal-setup` writes them to `~/.config/ideal/config.env`
+(chmod 600) and never prints the token back.
+
+---
+
 ## Repository layout
 
 ```
@@ -143,7 +164,7 @@ IDEAL_TOKEN=dev IDEAL_DB_PATH=./ideal.sqlite uvicorn app:app --reload
 ## 2. Install the plugin (each user)
 
 ```
-/plugin marketplace add <this-repo-url>
+/plugin marketplace add KhrulkovV/IdeaL     # public repo — no clone needed
 /plugin install ideal
 /ideal-setup            # enter the server URL, the shared token, and your author name
 ```
