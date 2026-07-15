@@ -39,15 +39,19 @@ If a colleague already runs an IdeaL server and has given you its **URL**, the s
 ```
 /plugin marketplace add KhrulkovV/IdeaL   # this public repo — no clone needed
 /plugin install ideal
-/ideal-setup                              # paste the URL + token, set your author name
+/reload-plugins                           # activate the plugin without restarting
+/ideal:ideal-setup                        # paste the URL + token, set your author name
 ```
 
-Then just talk to Claude: "save this to IdeaL", "what's stored about X?", "this idea
-is solid". The plugin is a pure client (Python standard library only — no pip, curl,
-or jq), so there is nothing else to set up.
+Plugin commands are **namespaced under the plugin name**, so they are
+`/ideal:ideal-setup`, `/ideal:ideal-add`, and `/ideal:ideal-read` (a bare
+`/ideal-setup` will report "Unknown command"). You can also skip the slash commands
+entirely and just talk to Claude — "save this to IdeaL", "what's stored about X?",
+"this idea is solid" — the skill triggers on its own. The plugin is a pure client
+(Python standard library only — no pip, curl, or jq), so there is nothing else to set up.
 
 The URL and token come from whoever runs the store and are shared privately — they are
-**not** in this repo. `/ideal-setup` writes them to `~/.config/ideal/config.env`
+**not** in this repo. `/ideal:ideal-setup` writes them to `~/.config/ideal/config.env`
 (chmod 600) and never prints the token back.
 
 ---
@@ -58,7 +62,7 @@ The URL and token come from whoever runs the store and are shared privately — 
 IdeaL/
 ├── .claude-plugin/        # marketplace.json + plugin.json (the installable plugin)
 ├── skills/ideal/          # SKILL.md (the workflow) + scripts/ideal.py (stdlib client)
-├── commands/              # /ideal-setup, /ideal-add, /ideal-read
+├── commands/              # /ideal:ideal-setup, /ideal:ideal-add, /ideal:ideal-read
 ├── server/                # FastAPI app, SQLite schema, exporter, tests, Dockerfile
 ├── deploy/docker-compose.yml
 ├── scripts/               # deploy.sh + smoke-test.sh (run on the VM; not installed)
@@ -121,7 +125,7 @@ SSH to the VM, forward the port from the machine running Claude Code:
 
 ```sh
 ssh -N -L 8000:127.0.0.1:8000 <user>@<vm-ip>
-# then point the client at the tunnel:  /ideal-setup  ->  http://127.0.0.1:8000
+# then point the client at the tunnel:  /ideal:ideal-setup  ->  http://127.0.0.1:8000
 ```
 
 This keeps the plain-HTTP, token-only endpoint off the public internet.
@@ -166,12 +170,15 @@ IDEAL_TOKEN=dev IDEAL_DB_PATH=./ideal.sqlite uvicorn app:app --reload
 ```
 /plugin marketplace add KhrulkovV/IdeaL     # public repo — no clone needed
 /plugin install ideal
-/ideal-setup            # enter the server URL, the shared token, and your author name
+/reload-plugins         # activate the plugin without restarting
+/ideal:ideal-setup      # enter the server URL, the shared token, and your author name
 ```
 
-`/ideal-setup` writes `~/.config/ideal/config.env` (chmod 600). The token is never
-printed back. You can override any value with the `IDEAL_URL` / `IDEAL_TOKEN` /
-`IDEAL_AUTHOR` environment variables.
+Plugin commands are namespaced under the plugin, so use `/ideal:ideal-setup`,
+`/ideal:ideal-add`, `/ideal:ideal-read` (not the bare names). `/ideal:ideal-setup`
+writes `~/.config/ideal/config.env` (chmod 600); the token is never printed back. You
+can override any value with the `IDEAL_URL` / `IDEAL_TOKEN` / `IDEAL_AUTHOR`
+environment variables.
 
 ---
 
@@ -180,8 +187,8 @@ printed back. You can override any value with the `IDEAL_URL` / `IDEAL_TOKEN` /
 **Add ideas** (writer):
 
 ```
-/ideal-add I think our idea store should use SQLite because it's zero-ops on a single
-VM. Also, Claude should decide the links by reading everything — not embeddings.
+/ideal:ideal-add I think our idea store should use SQLite because it's zero-ops on a
+single VM. Also, Claude should decide the links by reading everything — not embeddings.
 ```
 
 Claude splits that into atomic ideas, reads the **whole** store, checks for duplicates,
@@ -192,7 +199,7 @@ or "capture this thought" — the skill triggers without the slash command.)
 **Read / query** (reader):
 
 ```
-/ideal-read what's stored about our datastore choice?
+/ideal:ideal-read what's stored about our datastore choice?
 ```
 
 Claude fetches the store, reads it, and answers in prose citing idea ids — **writing

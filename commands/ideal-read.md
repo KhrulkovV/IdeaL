@@ -11,4 +11,4 @@ prose citing idea ids. This flow is **read-only** — do not add ideas or create
 
 If `$ARGUMENTS` is empty, ask the user what they want to know (e.g. a summary, a topic,
 an author, or a specific idea id). If the client is not configured, tell them to run
-`/ideal-setup` first.
+`/ideal:ideal-setup` first.

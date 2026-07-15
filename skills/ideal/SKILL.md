@@ -30,7 +30,7 @@ python3 "$CLAUDE_PLUGIN_ROOT/skills/ideal/scripts/ideal.py" <command>
 Set `IDEAL` to that path once per session for brevity:
 `IDEAL="$CLAUDE_PLUGIN_ROOT/skills/ideal/scripts/ideal.py"` then `python3 "$IDEAL" health`.
 
-If any command reports no URL/token, tell the user to run `/ideal-setup` first — do
+If any command reports no URL/token, tell the user to run `/ideal:ideal-setup` first — do
 not guess a URL or invent a token.
 
 ---

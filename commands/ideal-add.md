@@ -12,4 +12,4 @@ read (never a keyword or similarity algorithm), then write each idea earliest-fi
 report the new ids and their edges.
 
 If `$ARGUMENTS` is empty, ask the user what they want to capture. If the client is not
-configured, tell them to run `/ideal-setup` first.
+configured, tell them to run `/ideal:ideal-setup` first.
