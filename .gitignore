@@ -1,0 +1,16 @@
+# Secrets & local config
+.env
+config.env
+
+# Runtime data (SQLite lives here on the host via the Docker volume)
+data/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/

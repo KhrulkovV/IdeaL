@@ -1,0 +1,6 @@
+{
+  "name": "ideal",
+  "description": "Store atomic ideas and let Claude be the search engine: it reads the entire store and decides which ideas are similar or connected, then links them. Add brain-dumps, browse, and query a shared idea graph.",
+  "version": "0.1.0",
+  "author": { "name": "IdeaL" }
+}

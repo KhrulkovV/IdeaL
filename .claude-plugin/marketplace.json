@@ -1,0 +1,16 @@
+{
+  "name": "ideal",
+  "owner": { "name": "IdeaL" },
+  "metadata": {
+    "description": "Co-vibecode atomic idea store where Claude is the search engine.",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "ideal",
+      "source": ".",
+      "description": "Co-vibecode idea store: split thoughts into atomic ideas, let Claude decide similar/connected links by reading the whole store, and browse/query it.",
+      "version": "0.1.0"
+    }
+  ]
+}
