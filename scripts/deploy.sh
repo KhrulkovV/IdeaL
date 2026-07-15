@@ -26,7 +26,9 @@ if docker compose version >/dev/null 2>&1; then
 elif command -v docker-compose >/dev/null 2>&1; then
   COMPOSE="docker-compose"
 else
-  echo "ERROR: docker compose (or docker-compose) not found." >&2
+  echo "ERROR: docker compose (or docker-compose) not found on this VM." >&2
+  echo "  Install it first:  ./scripts/install-docker.sh" >&2
+  echo "  (then re-login or run this script with sudo)" >&2
   exit 1
 fi
 

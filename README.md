@@ -63,6 +63,15 @@ cp .env.example .env
 ./scripts/smoke-test.sh      # optional: health + add/export round-trip
 ```
 
+**No Docker on the VM?** Install it once (Docker Engine + compose plugin, via
+Docker's official script), then deploy:
+
+```sh
+./scripts/install-docker.sh  # needs sudo/root; adds you to the docker group
+newgrp docker                # or log out/in so group membership takes effect
+./scripts/deploy.sh          # (or: sudo ./scripts/deploy.sh, no re-login needed)
+```
+
 Then **open `IDEAL_PORT` (default 8000) in the VM's firewall / security group** so the
 machine running Claude Code can reach it.
 
