@@ -1,13 +1,16 @@
 #!/usr/bin/env sh
-# Run the IdeaL server WITHOUT Docker and WITHOUT root — just Python + uvicorn in
-# userspace. Use this when you can't install Docker (e.g. no sudo).
+# Run the IdeaL server WITHOUT Docker and WITHOUT root, inside your ACTIVE conda
+# env (or any active Python env). No virtualenv is created — dependencies install
+# into the currently-active interpreter. Activate your env first, e.g.:
 #
-#   ./scripts/run.sh start     # set up deps (once) and start in the background
-#   ./scripts/run.sh stop      # stop it
-#   ./scripts/run.sh status    # is it running?
-#   ./scripts/run.sh logs      # follow the log
+#   conda activate <your-env>
+#   ./scripts/run.sh start
 #
-# SQLite persists to ./data/ideal.sqlite; logs -> ./data/ideal.log; PID -> ./data/ideal.pid.
+# Commands:  start (default) | stop | restart | status | logs
+# Override the interpreter with IDEAL_PYTHON=/path/to/python if you'd rather not
+# activate (e.g. IDEAL_PYTHON=$(conda run -n myenv which python)).
+#
+# SQLite -> ./data/ideal.sqlite ; logs -> ./data/ideal.log ; PID -> ./data/ideal.pid.
 set -eu
 
 cd "$(dirname "$0")/.."
@@ -15,7 +18,7 @@ ROOT="$(pwd)"
 DATA_DIR="$ROOT/data"
 PID_FILE="$DATA_DIR/ideal.pid"
 LOG_FILE="$DATA_DIR/ideal.log"
-VENV="$ROOT/.venv"
+PY="${IDEAL_PYTHON:-python3}"
 
 # --- helpers -----------------------------------------------------------------
 
@@ -44,22 +47,22 @@ load_env() {
   export IDEAL_PORT IDEAL_DB_PATH
 }
 
-pybin() {
-  if [ -x "$VENV/bin/python" ]; then echo "$VENV/bin/python"; else echo "python3"; fi
-}
-
 ensure_deps() {
-  if [ -x "$VENV/bin/python" ]; then return; fi
-  echo "==> Setting up Python dependencies (first run only)..."
-  if python3 -m venv "$VENV" 2>/dev/null; then
-    "$VENV/bin/python" -m pip install --upgrade pip >/dev/null 2>&1 || true
-    "$VENV/bin/python" -m pip install -r "$ROOT/server/requirements.txt"
-  else
-    echo "WARN: 'python3 -m venv' failed (the python3-venv package may be missing," >&2
-    echo "      which would need root). Falling back to 'pip install --user'." >&2
-    rm -rf "$VENV"
-    python3 -m pip install --user -r "$ROOT/server/requirements.txt"
+  if ! command -v "$PY" >/dev/null 2>&1 && [ ! -x "$PY" ]; then
+    echo "ERROR: Python interpreter '$PY' not found. Activate your conda env, or set IDEAL_PYTHON." >&2
+    exit 1
   fi
+  PREFIX=$("$PY" -c 'import sys; print(sys.prefix)' 2>/dev/null || echo "?")
+  if [ -z "${CONDA_PREFIX:-}" ] && [ "$PY" = "python3" ]; then
+    echo "NOTE: no conda env appears active; using system python3 ($PREFIX)." >&2
+    echo "      Activate your env first, or set IDEAL_PYTHON, if that's not intended." >&2
+  fi
+  if "$PY" -c 'import fastapi, uvicorn' >/dev/null 2>&1; then
+    echo "==> Using Python env: $PREFIX (deps present)"
+    return
+  fi
+  echo "==> Installing dependencies into: $PREFIX"
+  "$PY" -m pip install -r "$ROOT/server/requirements.txt"
 }
 
 running() {
@@ -78,7 +81,6 @@ start() {
     exit 0
   fi
   ensure_deps
-  PY="$(pybin)"
   echo "==> Starting IdeaL on 0.0.0.0:${IDEAL_PORT} (no Docker, no root)..."
   # uvicorn imports app.py from server/; IDEAL_DB_PATH is absolute so cwd is safe.
   cd "$ROOT/server"
@@ -126,10 +128,10 @@ logs() {
 }
 
 case "${1:-start}" in
-  start)  start ;;
-  stop)   stop ;;
+  start)   start ;;
+  stop)    stop ;;
   restart) stop; start ;;
-  status) status ;;
-  logs)   logs ;;
+  status)  status ;;
+  logs)    logs ;;
   *) echo "usage: $0 {start|stop|restart|status|logs}" >&2; exit 2 ;;
 esac

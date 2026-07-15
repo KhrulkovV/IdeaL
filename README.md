@@ -72,18 +72,21 @@ newgrp docker                # or log out/in so group membership takes effect
 ./scripts/deploy.sh          # (or: sudo ./scripts/deploy.sh, no re-login needed)
 ```
 
-**No root at all (can't install Docker)?** Run the server directly with Python —
-no Docker, no sudo. It sets up a local virtualenv on first run and manages the
-process for you:
+**No root at all (can't install Docker)?** Run the server directly with Python in
+your **active conda env** — no Docker, no sudo, no virtualenv. Dependencies install
+into whatever env is active:
 
 ```sh
+conda activate <your-env>    # deps install here; activate before starting
 cp .env.example .env         # set IDEAL_TOKEN
-./scripts/run.sh start       # sets up deps, starts uvicorn in the background
+./scripts/run.sh start       # installs deps into the active env, starts uvicorn
 ./scripts/run.sh status      # running? PID?
 ./scripts/run.sh logs        # follow the log
 ./scripts/run.sh stop
 ```
 
+The runner uses the active interpreter (`$CONDA_PREFIX`), or set
+`IDEAL_PYTHON=$(conda run -n <env> which python)` to point at one without activating.
 SQLite persists to `./data/ideal.sqlite`, logs to `./data/ideal.log`. The process
 survives your SSH session (it's `nohup`ed); to restart it automatically after a VM
 reboot without root, add a user crontab line: `@reboot cd /path/to/IdeaL && ./scripts/run.sh start`.
