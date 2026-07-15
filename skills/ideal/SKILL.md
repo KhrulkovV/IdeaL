@@ -3,11 +3,14 @@ name: ideal
 description: >-
   Use for the IdeaL co-vibecode idea store. Triggers on adding/capturing ideas
   ("add an idea", "save this to IdeaL", "capture this thought", "brain-dump",
-  "store these notes") and on reading/querying it ("read the idea store",
+  "store these notes"), on reading/querying it ("read the idea store",
   "browse IdeaL", "what has <author> been thinking about <topic>", "show idea
-  <id>", "what's stored about <X>"). On ADD, split a brain-dump into atomic
-  ideas, read the WHOLE store, and decide similar/connected links by reasoning —
-  never by any keyword or similarity algorithm. Claude is the search engine.
+  <id>", "what's stored about <X>"), on rating/endorsing ideas ("this idea is
+  very good", "that one's reliable/solid", "mark X as weak", "rate idea Y"), and
+  on editing or removing them ("update idea X", "fix that idea", "delete idea Y").
+  On ADD, split a brain-dump into atomic ideas, read the WHOLE store, and decide
+  similar/connected links by reasoning — never by any keyword or similarity
+  algorithm. Claude is the search engine.
 ---
 
 # IdeaL — atomic idea store where you are the search engine
@@ -97,6 +100,51 @@ For questions about what is stored, **never POST**. Use:
 Answer directly: summarize or cluster themes, do topic+author lookups by reading, or
 surface an idea together with what it links to. Reading writes nothing — do not call
 `add` or `/links` in this flow.
+
+When the user asks for the "best", "most reliable", or "most useful" ideas, rank by
+the `reputation` / `usefulness` values shown in the export (higher = better). Ideas
+left at `—` are simply unrated, not bad — say so rather than treating them as low.
+
+---
+
+## Flow C — RATE & EDIT (updates)
+
+Two metadata scores let users express judgment about an idea; both are 0–100 and
+null until set. **`reputation`** = how good / reliable / trusted the idea is (an
+endorsement). **`usefulness`** = how useful it is for a task at hand. When the user
+says "this idea is very good", "that one's solid/reliable", "weak", etc., set
+`reputation`; when they speak to usefulness for a task, set `usefulness`.
+
+1. **Find the idea.** If the user names an id, use it. Otherwise run `export`, read,
+   and identify the idea they mean (confirm if ambiguous).
+2. **Map the judgment to a 0–100 score** (if the user gives a number, use it):
+
+   | user says | reputation |
+   |---|---|
+   | excellent / very good / proven / highly reliable | ~90 |
+   | good / solid / reliable | ~75 |
+   | okay / neutral / unsure | ~50 |
+   | weak / shaky / unreliable | ~25 |
+   | bad / wrong / debunked | ~10 |
+
+   Nudge relative to any existing value rather than resetting (e.g. "even better" on
+   a 75 → ~90).
+3. **Write it** with a partial update — send only the fields that change:
+   ```
+   echo '{"reputation": 90}' | python3 "$IDEAL" update <id>
+   ```
+   `update` uses partial semantics: omitted keys are left untouched; an explicit
+   `null` clears a field. The slug `id` never changes, even if you edit the `title`.
+   Use the same command to fix a `body`/`title`/`tags` the user wants changed.
+4. **Report** the idea id and its new value (e.g. `reputation 50 → 90`).
+
+`reputation` is a single current score (latest judgment wins), not an average across
+users — per-author reputation is a later addition.
+
+**Delete.** To remove an idea: `python3 "$IDEAL" delete <id>` (its links cascade).
+To remove one edge: `python3 "$IDEAL" unlink <source-id> <target-id> <similar|connected>`.
+Deletion is irreversible — confirm with the user before deleting anything they did
+not just ask to delete in the same breath.
 
 ---
 

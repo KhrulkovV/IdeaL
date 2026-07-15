@@ -186,6 +186,9 @@ python3 skills/ideal/scripts/ideal.py export            # whole store as Markdow
 python3 skills/ideal/scripts/ideal.py list              # id / title / tags index
 python3 skills/ideal/scripts/ideal.py get <id>          # one idea + its links
 echo '{"title":"...","body":"...","tags":["x"]}' | python3 skills/ideal/scripts/ideal.py add
+echo '{"reputation":90,"body":"revised"}' | python3 skills/ideal/scripts/ideal.py update <id>
+python3 skills/ideal/scripts/ideal.py delete <id>       # remove an idea (links cascade)
+python3 skills/ideal/scripts/ideal.py unlink <src> <tgt> similar|connected
 ```
 
 Python 3 standard library only — no pip, curl, or jq needed on the client.
@@ -204,7 +207,14 @@ is open. Errors use a `{"error","detail"}` envelope.
 | `GET /ideas` | list ids, titles, tags |
 | `GET /ideas/{id}` | one idea + `links_out`/`links_in` (`?format=md`) |
 | `POST /ideas` | add one idea **and** its edges atomically → `{id, edges_created}` |
+| `PATCH /ideas/{id}` | partial update; only supplied fields change, `id` is immutable → the updated idea |
+| `DELETE /ideas/{id}` | delete one idea; its links cascade → `{deleted}` |
 | `POST /links` | link two existing ideas (idempotent) |
+| `DELETE /links` | remove one edge `{source_id, target_id, type}` → `{deleted}` |
+
+`PATCH` uses true partial semantics: an omitted key is left untouched, while an
+explicit `null` clears a nullable field. `title`/`body` cannot be blanked, and the
+slug `id` never changes even when the title does.
 
 Adding an idea whose edge points at an unknown `target_id` **rejects the whole request**
 (422, rolled back) by default, so Claude never records a link to something that doesn't

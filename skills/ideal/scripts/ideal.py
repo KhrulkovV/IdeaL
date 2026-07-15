@@ -7,6 +7,9 @@ Commands:
   list                   list ideas (id, title, tags)
   get <id> [--format]    fetch one idea + its edges
   add                    read one idea JSON object from STDIN and POST it
+  update <id>            read a partial idea JSON from STDIN and PATCH it
+  delete <id>            delete one idea (its links cascade)
+  unlink <src> <tgt> <type>   delete one edge (type: similar|connected)
   config --url --token --author   write client config (never prints the token)
 
 Config resolution (per key, first found wins):
@@ -175,6 +178,53 @@ def cmd_add(cfg, args):
     return 0
 
 
+def cmd_update(cfg, args):
+    _require_config(cfg)
+    raw = sys.stdin.read()
+    if not raw.strip():
+        _die("no JSON on stdin. Pipe the fields to change to `ideal.py update <id>`.", 1)
+    try:
+        patch = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        _die(f"invalid JSON on stdin: {exc}", 1)
+    if not isinstance(patch, dict):
+        _die("stdin JSON must be an object", 1)
+    if not patch:
+        _die("no fields to update", 1)
+    path = "/ideas/" + urllib.parse.quote(args.id)
+    status, text = _request(cfg, "PATCH", path, body=patch)
+    if status == 404:
+        _die(f"no idea with id '{args.id}'", 1)
+    if status != 200:
+        _die(f"update failed ({status}): {text}", 1)
+    print(json.loads(text)["id"])
+    return 0
+
+
+def cmd_delete(cfg, args):
+    _require_config(cfg)
+    path = "/ideas/" + urllib.parse.quote(args.id)
+    status, text = _request(cfg, "DELETE", path)
+    if status == 404:
+        _die(f"no idea with id '{args.id}'", 1)
+    if status != 200:
+        _die(f"delete failed ({status}): {text}", 1)
+    print(f"deleted {args.id}")
+    return 0
+
+
+def cmd_unlink(cfg, args):
+    _require_config(cfg)
+    if args.type not in ("similar", "connected"):
+        _die(f"type must be 'similar' or 'connected', got {args.type!r}", 1)
+    body = {"source_id": args.source, "target_id": args.target, "type": args.type}
+    status, text = _request(cfg, "DELETE", "/links", body=body)
+    if status != 200:
+        _die(f"unlink failed ({status}): {text}", 1)
+    print("deleted" if json.loads(text).get("deleted") else "no such link")
+    return 0
+
+
 def cmd_config(_cfg, args):
     path = _config_path()
     directory = os.path.dirname(path)
@@ -217,6 +267,14 @@ def main(argv=None):
     p_add = sub.add_parser("add")
     p_add.add_argument("--on-unknown-target", choices=["reject", "ignore"], default=None,
                        dest="on_unknown_target")
+    p_update = sub.add_parser("update")
+    p_update.add_argument("id")
+    p_delete = sub.add_parser("delete")
+    p_delete.add_argument("id")
+    p_unlink = sub.add_parser("unlink")
+    p_unlink.add_argument("source")
+    p_unlink.add_argument("target")
+    p_unlink.add_argument("type", choices=["similar", "connected"])
     p_config = sub.add_parser("config")
     p_config.add_argument("--url")
     p_config.add_argument("--token")
@@ -229,6 +287,9 @@ def main(argv=None):
         "list": cmd_list,
         "get": cmd_get,
         "add": cmd_add,
+        "update": cmd_update,
+        "delete": cmd_delete,
+        "unlink": cmd_unlink,
         "config": cmd_config,
     }
     return handlers[args.cmd](load_config(), args)

@@ -15,7 +15,7 @@ import config
 import db
 import ids
 from export import render_json, render_markdown
-from models import IdeaCreate, LinkCreate
+from models import IdeaCreate, IdeaUpdate, LinkCreate, LinkDelete
 
 
 @asynccontextmanager
@@ -114,31 +114,14 @@ def get_ideas():
     }
 
 
-@app.get("/ideas/{idea_id}", dependencies=[Depends(auth_read)])
-def get_idea(idea_id: str, format: str = Query(default="json")):
-    conn = db.connect()
-    try:
-        row = db.fetch_idea(conn, idea_id)
-        if row is None:
-            raise HTTPException(
-                status_code=404,
-                detail={"error": "not_found", "detail": f"no idea with id '{idea_id}'"},
-            )
-        links_out = db.fetch_links_out(conn, idea_id)
-        links_in = db.fetch_links_in(conn, idea_id)
-    finally:
-        conn.close()
+def _idea_not_found(idea_id: str) -> HTTPException:
+    return HTTPException(
+        status_code=404,
+        detail={"error": "not_found", "detail": f"no idea with id '{idea_id}'"},
+    )
 
-    if format == "md":
-        edges = [
-            {"source_id": idea_id, "target_id": l["target_id"], "type": l["type"], "note": l["note"]}
-            for l in links_out
-        ]
-        return PlainTextResponse(
-            content=render_markdown([row], edges, db.now_iso()),
-            media_type="text/markdown",
-        )
 
+def _serialize_idea(row, links_out, links_in) -> dict:
     return {
         "id": row["id"],
         "title": row["title"],
@@ -159,6 +142,31 @@ def get_idea(idea_id: str, format: str = Query(default="json")):
             {"source_id": l["source_id"], "type": l["type"], "note": l["note"]} for l in links_in
         ],
     }
+
+
+@app.get("/ideas/{idea_id}", dependencies=[Depends(auth_read)])
+def get_idea(idea_id: str, format: str = Query(default="json")):
+    conn = db.connect()
+    try:
+        row = db.fetch_idea(conn, idea_id)
+        if row is None:
+            raise _idea_not_found(idea_id)
+        links_out = db.fetch_links_out(conn, idea_id)
+        links_in = db.fetch_links_in(conn, idea_id)
+    finally:
+        conn.close()
+
+    if format == "md":
+        edges = [
+            {"source_id": idea_id, "target_id": l["target_id"], "type": l["type"], "note": l["note"]}
+            for l in links_out
+        ]
+        return PlainTextResponse(
+            content=render_markdown([row], edges, db.now_iso()),
+            media_type="text/markdown",
+        )
+
+    return _serialize_idea(row, links_out, links_in)
 
 
 # --- writes ------------------------------------------------------------------
@@ -286,3 +294,80 @@ def create_link(payload: LinkCreate):
     finally:
         conn.close()
     return {"created": created}
+
+
+@app.patch("/ideas/{idea_id}", dependencies=[Depends(auth_write)])
+def update_idea(idea_id: str, payload: IdeaUpdate):
+    provided = payload.model_dump(exclude_unset=True)
+
+    fields = {}
+    for key, value in provided.items():
+        if key == "tags":
+            fields["tags"] = ids.normalize_tags(value or [])
+        elif key == "meta":
+            fields["meta"] = json.dumps(value) if value is not None else None
+        else:
+            fields[key] = value
+
+    conn = db.connect()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        if not db.idea_exists(conn, idea_id):
+            conn.execute("ROLLBACK")
+            raise _idea_not_found(idea_id)
+        db.update_idea(conn, idea_id, fields, db.now_iso())
+        conn.execute("COMMIT")
+        row = db.fetch_idea(conn, idea_id)
+        links_out = db.fetch_links_out(conn, idea_id)
+        links_in = db.fetch_links_in(conn, idea_id)
+    except HTTPException:
+        raise
+    except Exception:
+        try:
+            conn.execute("ROLLBACK")
+        except Exception:
+            pass
+        raise
+    finally:
+        conn.close()
+    return _serialize_idea(row, links_out, links_in)
+
+
+@app.delete("/ideas/{idea_id}", dependencies=[Depends(auth_write)])
+def delete_idea(idea_id: str):
+    conn = db.connect()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        if not db.delete_idea(conn, idea_id):
+            conn.execute("ROLLBACK")
+            raise _idea_not_found(idea_id)
+        conn.execute("COMMIT")
+    except HTTPException:
+        raise
+    except Exception:
+        try:
+            conn.execute("ROLLBACK")
+        except Exception:
+            pass
+        raise
+    finally:
+        conn.close()
+    return {"deleted": idea_id}
+
+
+@app.delete("/links", dependencies=[Depends(auth_write)])
+def delete_link(payload: LinkDelete):
+    conn = db.connect()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        deleted = db.delete_link(conn, payload.source_id, payload.target_id, payload.type)
+        conn.execute("COMMIT")
+    except Exception:
+        try:
+            conn.execute("ROLLBACK")
+        except Exception:
+            pass
+        raise
+    finally:
+        conn.close()
+    return {"deleted": deleted}

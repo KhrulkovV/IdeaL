@@ -123,3 +123,39 @@ def insert_link(conn, source_id: str, target_id: str, type_: str, note: str, whe
         (source_id, target_id, type_, note, when),
     )
     return cur.rowcount > 0
+
+
+# Columns an update is allowed to touch. Fixed whitelist — never user-supplied,
+# so it is safe to interpolate into the SET clause.
+UPDATABLE_COLUMNS = (
+    "title", "body", "author", "tags", "task",
+    "usefulness", "reputation", "status", "meta",
+)
+
+
+def update_idea(conn, idea_id: str, fields: dict, when: str) -> bool:
+    """Update the given columns of one idea and bump updated_at. `fields` keys
+    must be drawn from UPDATABLE_COLUMNS. Returns True if the idea existed."""
+    cols = [c for c in fields if c in UPDATABLE_COLUMNS]
+    assignments = [f"{c} = ?" for c in cols] + ["updated_at = ?"]
+    params = [fields[c] for c in cols] + [when, idea_id]
+    cur = conn.execute(
+        f"UPDATE ideas SET {', '.join(assignments)} WHERE id = ?", params
+    )
+    return cur.rowcount > 0
+
+
+def delete_idea(conn, idea_id: str) -> bool:
+    """Delete one idea. Its links cascade (ON DELETE CASCADE + foreign_keys=ON).
+    Returns True if a row was removed."""
+    cur = conn.execute("DELETE FROM ideas WHERE id = ?", (idea_id,))
+    return cur.rowcount > 0
+
+
+def delete_link(conn, source_id: str, target_id: str, type_: str) -> bool:
+    """Delete one specific edge. Returns True if a row was removed."""
+    cur = conn.execute(
+        "DELETE FROM links WHERE source_id = ? AND target_id = ? AND type = ?",
+        (source_id, target_id, type_),
+    )
+    return cur.rowcount > 0
