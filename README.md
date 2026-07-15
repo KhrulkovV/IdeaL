@@ -72,6 +72,22 @@ newgrp docker                # or log out/in so group membership takes effect
 ./scripts/deploy.sh          # (or: sudo ./scripts/deploy.sh, no re-login needed)
 ```
 
+**No root at all (can't install Docker)?** Run the server directly with Python —
+no Docker, no sudo. It sets up a local virtualenv on first run and manages the
+process for you:
+
+```sh
+cp .env.example .env         # set IDEAL_TOKEN
+./scripts/run.sh start       # sets up deps, starts uvicorn in the background
+./scripts/run.sh status      # running? PID?
+./scripts/run.sh logs        # follow the log
+./scripts/run.sh stop
+```
+
+SQLite persists to `./data/ideal.sqlite`, logs to `./data/ideal.log`. The process
+survives your SSH session (it's `nohup`ed); to restart it automatically after a VM
+reboot without root, add a user crontab line: `@reboot cd /path/to/IdeaL && ./scripts/run.sh start`.
+
 Then **open `IDEAL_PORT` (default 8000) in the VM's firewall / security group** so the
 machine running Claude Code can reach it.
 
