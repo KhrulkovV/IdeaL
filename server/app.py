@@ -3,6 +3,7 @@
 All similarity/connection reasoning happens Claude-side. This server only stores
 atomic ideas and typed edges, and renders the whole store as one markdown doc.
 """
+import hmac
 import json
 import sys
 from contextlib import asynccontextmanager
@@ -51,7 +52,7 @@ async def lifespan(_app: FastAPI):
     yield
 
 
-app = FastAPI(title="IdeaL", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="IdeaL", version="0.2.0", lifespan=lifespan)
 
 
 # --- auth --------------------------------------------------------------------
@@ -63,7 +64,7 @@ def _check_token(authorization: Optional[str]) -> None:
             detail={"error": "unauthorized", "detail": "missing or malformed bearer token"},
         )
     token = authorization.split(" ", 1)[1].strip()
-    if token != config.settings.token:
+    if not hmac.compare_digest(token, config.settings.token):
         raise HTTPException(
             status_code=401,
             detail={"error": "unauthorized", "detail": "invalid token"},
@@ -96,7 +97,12 @@ def health():
         ideas, links = db.counts(conn)
     finally:
         conn.close()
-    return {"status": "ok", "ideas": ideas, "links": links}
+    return {
+        "status": "ok",
+        "ideas": ideas,
+        "links": links,
+        "rag": {"enabled": rag.enabled, "indexed": len(rag._vecs)},
+    }
 
 
 # --- reads -------------------------------------------------------------------
@@ -134,6 +140,10 @@ def get_ideas():
                 "id": r["id"],
                 "title": r["title"],
                 "tags": ids.split_tags(r["tags"]),
+                "author": r["author"],
+                "usefulness": r["usefulness"],
+                "reputation": r["reputation"],
+                "status": r["status"],
                 "updated_at": r["updated_at"],
             }
             for r in rows
@@ -297,7 +307,7 @@ def create_idea(
         conn.close()
 
     # Embed-on-write: index the new idea (best-effort, after the store commit).
-    rag.index_idea(new_id, payload.title, payload.body)
+    rag.index_idea(new_id)
 
     response.headers["Location"] = f"/ideas/{new_id}"
     return {
@@ -367,10 +377,12 @@ def update_idea(idea_id: str, payload: IdeaUpdate):
             conn.execute("ROLLBACK")
             raise _idea_not_found(idea_id)
         db.update_idea(conn, idea_id, fields, db.now_iso())
-        conn.execute("COMMIT")
+        # Snapshot the updated row + links INSIDE the txn, before COMMIT, so a
+        # concurrent delete can't turn a successful write into a 500 here.
         row = db.fetch_idea(conn, idea_id)
         links_out = db.fetch_links_out(conn, idea_id)
         links_in = db.fetch_links_in(conn, idea_id)
+        conn.execute("COMMIT")
     except HTTPException:
         raise
     except Exception:
@@ -384,7 +396,7 @@ def update_idea(idea_id: str, payload: IdeaUpdate):
 
     # Re-embed only when the embedded text actually changed (db already NULLed it).
     if "title" in fields or "body" in fields:
-        rag.index_idea(idea_id, row["title"], row["body"])
+        rag.index_idea(idea_id)
 
     return _serialize_idea(row, links_out, links_in)
 

@@ -2,13 +2,15 @@
 """ideal.py — tiny stdlib client for the IdeaL store. No third-party deps.
 
 Commands:
-  health                 check the server is up (and your token works)
+  health                 liveness check (server up?); does NOT verify your token
   export [--format md|json]   fetch the WHOLE store as one document (default md)
-  list                   list ideas (id, title, tags)
+  list [--json]          list ideas (id, title, tags, scores)
   get <id> [--format]    fetch one idea + its edges
   add                    read one idea JSON object from STDIN and POST it
   update <id>            read a partial idea JSON from STDIN and PATCH it
+  rate <id> <0-100> [--field reputation|usefulness]   set a score (default reputation)
   delete <id>            delete one idea (its links cascade)
+  link <src> <tgt> <type> [--note]     link two existing ideas (type: similar|connected)
   unlink <src> <tgt> <type>   delete one edge (type: similar|connected)
   search <query> [--k --start-k --hops --json]   semantic GraphRAG search
   config --url --token --author   write client config (never prints the token)
@@ -121,19 +123,29 @@ def cmd_export(cfg, args):
     return 0
 
 
-def cmd_list(cfg, _args):
+def cmd_list(cfg, args):
     _require_config(cfg)
     status, text = _request(cfg, "GET", "/ideas")
     if status != 200:
         _die(f"list failed ({status}): {text}", 1)
-    ideas = json.loads(text).get("ideas", [])
+    data = json.loads(text)
+    if getattr(args, "json", False):
+        print(json.dumps(data, indent=2, ensure_ascii=False))
+        return 0
+    ideas = data.get("ideas", [])
     if not ideas:
         print("(store is empty)")
         return 0
     for i in ideas:
         tags = ", ".join(i.get("tags") or [])
         tag_part = f"  [{tags}]" if tags else ""
-        print(f"{i['id']}  —  {i['title']}{tag_part}")
+        scores = []
+        if i.get("reputation") is not None:
+            scores.append(f"rep {i['reputation']}")
+        if i.get("usefulness") is not None:
+            scores.append(f"use {i['usefulness']}")
+        score_part = f"  ({', '.join(scores)})" if scores else ""
+        print(f"{i['id']}  —  {i['title']}{tag_part}{score_part}")
     return 0
 
 
@@ -175,7 +187,15 @@ def cmd_add(cfg, args):
     status, text = _request(cfg, "POST", "/ideas", query=query, body=idea)
     if status not in (200, 201):
         _die(f"add failed ({status}): {text}", 1)
-    print(json.loads(text)["id"])
+    result = json.loads(text)
+    print(result["id"])  # id alone on stdout, so callers can capture it cleanly
+    created = result.get("edges_created", 0)
+    ignored = result.get("edges_ignored") or []
+    if created or ignored:
+        parts = [f"{created} edge(s) created"]
+        if ignored:
+            parts.append(f"dropped unknown target(s): {', '.join(ignored)}")
+        print("ideal: " + "; ".join(parts), file=sys.stderr)
     return 0
 
 
@@ -199,6 +219,37 @@ def cmd_update(cfg, args):
     if status != 200:
         _die(f"update failed ({status}): {text}", 1)
     print(json.loads(text)["id"])
+    return 0
+
+
+def cmd_rate(cfg, args):
+    _require_config(cfg)
+    if not 0 <= args.score <= 100:
+        _die(f"score must be between 0 and 100, got {args.score}", 1)
+    path = "/ideas/" + urllib.parse.quote(args.id)
+    status, text = _request(cfg, "PATCH", path, body={args.field: args.score})
+    if status == 404:
+        _die(f"no idea with id '{args.id}'", 1)
+    if status != 200:
+        _die(f"rate failed ({status}): {text}", 1)
+    print(f"{args.id}: {args.field} = {json.loads(text).get(args.field)}")
+    return 0
+
+
+def cmd_link(cfg, args):
+    _require_config(cfg)
+    if args.type not in ("similar", "connected"):
+        _die(f"type must be 'similar' or 'connected', got {args.type!r}", 1)
+    body = {
+        "source_id": args.source, "target_id": args.target,
+        "type": args.type, "note": args.note or "",
+    }
+    status, text = _request(cfg, "POST", "/links", body=body)
+    if status == 422:
+        _die(f"link failed: unknown idea id in ({args.source!r}, {args.target!r})", 1)
+    if status not in (200, 201):
+        _die(f"link failed ({status}): {text}", 1)
+    print("created" if json.loads(text).get("created") else "already linked")
     return 0
 
 
@@ -247,7 +298,7 @@ def cmd_search(cfg, args):
             score = h.get("score")
             tag = f"seed · {score:.3f}" if isinstance(score, (int, float)) else "seed"
         else:
-            tag = f"reached · {h['depth']} hop out"
+            tag = h.get("reason") or f"reached · {h['depth']} hop out"
         tags = ", ".join(h.get("tags") or [])
         tag_part = f"  [{tags}]" if tags else ""
         print(f"{h['id']}  —  {h['title']}  ({tag}){tag_part}")
@@ -287,34 +338,49 @@ def cmd_config(_cfg, args):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(prog="ideal", description="IdeaL store client")
-    sub = parser.add_subparsers(dest="cmd", required=True)
+    parser = argparse.ArgumentParser(
+        prog="ideal",
+        description="Stdlib client for the IdeaL atomic-idea store.",
+        epilog="Config: IDEAL_URL / IDEAL_TOKEN / IDEAL_AUTHOR "
+               "(env, or ~/.config/ideal/config.env via /ideal-setup).",
+    )
+    sub = parser.add_subparsers(dest="cmd", required=True, metavar="<command>")
 
-    sub.add_parser("health")
-    p_export = sub.add_parser("export")
+    sub.add_parser("health", help="liveness check (does NOT verify your token)")
+    p_export = sub.add_parser("export", help="fetch the whole store as one document")
     p_export.add_argument("--format", choices=["md", "json"], default="md")
-    sub.add_parser("list")
-    p_get = sub.add_parser("get")
+    p_list = sub.add_parser("list", help="list ideas (id, title, tags, scores)")
+    p_list.add_argument("--json", action="store_true", help="emit the raw JSON response")
+    p_get = sub.add_parser("get", help="fetch one idea and its edges")
     p_get.add_argument("id")
     p_get.add_argument("--format", choices=["md", "json"], default="json")
-    p_add = sub.add_parser("add")
+    p_add = sub.add_parser("add", help="add one idea read as JSON from stdin")
     p_add.add_argument("--on-unknown-target", choices=["reject", "ignore"], default=None,
                        dest="on_unknown_target")
-    p_update = sub.add_parser("update")
+    p_update = sub.add_parser("update", help="patch one idea with JSON fields from stdin")
     p_update.add_argument("id")
-    p_delete = sub.add_parser("delete")
+    p_rate = sub.add_parser("rate", help="set an idea's reputation/usefulness score (0-100)")
+    p_rate.add_argument("id")
+    p_rate.add_argument("score", type=int)
+    p_rate.add_argument("--field", choices=["reputation", "usefulness"], default="reputation")
+    p_delete = sub.add_parser("delete", help="delete one idea (its links cascade)")
     p_delete.add_argument("id")
-    p_unlink = sub.add_parser("unlink")
+    p_link = sub.add_parser("link", help="link two existing ideas (idempotent)")
+    p_link.add_argument("source")
+    p_link.add_argument("target")
+    p_link.add_argument("type", choices=["similar", "connected"])
+    p_link.add_argument("--note", default="")
+    p_unlink = sub.add_parser("unlink", help="delete one edge")
     p_unlink.add_argument("source")
     p_unlink.add_argument("target")
     p_unlink.add_argument("type", choices=["similar", "connected"])
-    p_search = sub.add_parser("search")
+    p_search = sub.add_parser("search", help="semantic GraphRAG search")
     p_search.add_argument("query")
     p_search.add_argument("--k", type=int, default=8)
     p_search.add_argument("--start-k", type=int, default=4, dest="start_k")
     p_search.add_argument("--hops", type=int, default=1)
     p_search.add_argument("--json", action="store_true")
-    p_config = sub.add_parser("config")
+    p_config = sub.add_parser("config", help="write client config (never prints the token)")
     p_config.add_argument("--url")
     p_config.add_argument("--token")
     p_config.add_argument("--author")
@@ -327,7 +393,9 @@ def main(argv=None):
         "get": cmd_get,
         "add": cmd_add,
         "update": cmd_update,
+        "rate": cmd_rate,
         "delete": cmd_delete,
+        "link": cmd_link,
         "unlink": cmd_unlink,
         "search": cmd_search,
         "config": cmd_config,

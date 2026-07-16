@@ -194,6 +194,7 @@ IDEAL_TOKEN=dev IDEAL_DB_PATH=./ideal.sqlite uvicorn app:app --reload
 |---|---|---|
 | `IDEAL_TOKEN` | *(required)* | Shared bearer token. No token → server refuses to start. |
 | `IDEAL_PORT` | `8000` | Host port to expose (open it in the firewall). |
+| `IDEAL_HOST` | `0.0.0.0` | Bind interface on the `run.sh` (no-Docker) path; `127.0.0.1` = loopback only. Under Docker the container always binds `0.0.0.0` internally. |
 | `IDEAL_DB_PATH` | `/data/ideal.sqlite` | SQLite path inside the container (persisted to `./data`). |
 | `IDEAL_PROTECT_READS` | `true` | Require the token on read endpoints too. |
 | `IDEAL_ON_UNKNOWN_TARGET` | `reject` | `reject` = refuse ideas linking to unknown targets; `ignore` = drop those edges. |
@@ -248,10 +249,13 @@ exploring") and targeted ones ("show idea `use-sqlite-for-zero-ops`") both work.
 ```
 python3 skills/ideal/scripts/ideal.py health
 python3 skills/ideal/scripts/ideal.py export            # whole store as Markdown
-python3 skills/ideal/scripts/ideal.py list              # id / title / tags index
+python3 skills/ideal/scripts/ideal.py list              # id / title / tags index (--json for machine-readable)
 python3 skills/ideal/scripts/ideal.py get <id>          # one idea + its links
+python3 skills/ideal/scripts/ideal.py search "query"    # server-side semantic search (needs IDEAL_RAG_ENABLED)
 echo '{"title":"...","body":"...","tags":["x"]}' | python3 skills/ideal/scripts/ideal.py add
 echo '{"reputation":90,"body":"revised"}' | python3 skills/ideal/scripts/ideal.py update <id>
+python3 skills/ideal/scripts/ideal.py rate <id> 90 [--field reputation|usefulness]   # 0–100 score
+python3 skills/ideal/scripts/ideal.py link <src> <tgt> similar|connected [--note "why"]
 python3 skills/ideal/scripts/ideal.py delete <id>       # remove an idea (links cascade)
 python3 skills/ideal/scripts/ideal.py unlink <src> <tgt> similar|connected
 ```

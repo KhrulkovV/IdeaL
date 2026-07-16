@@ -72,7 +72,8 @@ def fetch_all_ideas(conn):
 
 def list_ideas(conn):
     return conn.execute(
-        "SELECT id, title, tags, updated_at FROM ideas ORDER BY created_at ASC, id ASC"
+        "SELECT id, title, tags, author, usefulness, reputation, status, updated_at "
+        "FROM ideas ORDER BY created_at ASC, id ASC"
     ).fetchall()
 
 

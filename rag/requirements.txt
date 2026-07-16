@@ -1,4 +1,0 @@
-# Read-side GraphRAG layer (additive; server needs none of this).
-langchain-graph-retriever   # first-party GraphRetriever: vector seed + edge traversal
-langgraph                   # thin retrieve→format StateGraph wrapper
-sentence-transformers       # default embedder: all-MiniLM-L6-v2
