@@ -5,11 +5,18 @@ Code splits them into atomic ideas, decides how each relates to what's already s
 links them, and saves them to a small server on a cloud VM. Another person reads and
 queries the store — also through Claude.
 
-**The defining constraint: there is no similarity algorithm anywhere.** No embeddings,
-no RAG, no vector search, no keyword scoring — not on the server, not in the plugin.
-The server is a dumb SQLite store plus a Markdown exporter. To find what's related,
-Claude fetches the **entire store as one Markdown document** and **reads it**. Claude's
-judgment *is* the search engine.
+**The defining constraint: no algorithm decides how ideas relate.** No embeddings, no
+vector search, no keyword scoring picks the links — Claude does, by reading the whole
+store. The server is a dumb SQLite store plus a Markdown exporter; to find what's
+related, Claude fetches the **entire store as one Markdown document** and **reads it**.
+Claude's judgment *is* the linker.
+
+> **One deliberate, opt-in exception:** an *additive, read-only* semantic index on the
+> VM powers `POST /search` (`/ideal-search`) for pulling a relevant sub-slice by meaning
+> when the store grows past what's comfortable to read whole. It **never creates links** —
+> it embeds idea text and traverses the links Claude already authored — and it's off with
+> `IDEAL_RAG_ENABLED=false`. The core add/link/read flow above is untouched. See
+> `docs/superpowers/specs/2026-07-16-server-side-rag-design.md`.
 
 ```
  Writer                                   VM (your cloud box)
@@ -116,6 +123,23 @@ SQLite persists to `./data/ideal.sqlite`, logs to `./data/ideal.log`. The proces
 survives your SSH session (it's `nohup`ed); to restart it automatically after a VM
 reboot without root, add a user crontab line: `@reboot cd /path/to/IdeaL && ./scripts/run.sh start`.
 
+### Redeploying after a code update
+
+Pull and rebuild in place — the SQLite volume and the model cache persist:
+
+```sh
+cd IdeaL && git pull
+./scripts/deploy.sh          # Docker: rebuilds the image (installs new deps), restarts
+# or, Python-direct:
+./scripts/run.sh stop && ./scripts/run.sh start   # re-installs deps into the active env
+```
+
+The first boot with `IDEAL_RAG_ENABLED=true` downloads the embedding model (~90 MB, cached
+on `./data`) and backfills embeddings for every existing idea before serving — expect the
+health check to take up to a few minutes that once. Later restarts load the stored vectors
+instantly. Adding embeddings to a store that already has ideas is a one-time backfill; the
+schema migration (three nullable columns on `ideas`) is applied automatically and idempotently.
+
 ### Reaching the server from another machine
 
 The client needs to reach `IDEAL_PORT` (default 8000) on the VM. Two options:
@@ -162,6 +186,8 @@ IDEAL_TOKEN=dev IDEAL_DB_PATH=./ideal.sqlite uvicorn app:app --reload
 | `IDEAL_DB_PATH` | `/data/ideal.sqlite` | SQLite path inside the container (persisted to `./data`). |
 | `IDEAL_PROTECT_READS` | `true` | Require the token on read endpoints too. |
 | `IDEAL_ON_UNKNOWN_TARGET` | `reject` | `reject` = refuse ideas linking to unknown targets; `ignore` = drop those edges. |
+| `IDEAL_RAG_ENABLED` | `true` | Server-side semantic search (`POST /search`). `false` = no model, `/search` returns 503. |
+| `IDEAL_RAG_MODEL` | `all-MiniLM-L6-v2` | sentence-transformers model for embeddings (changing it re-embeds on next boot). |
 
 ---
 
@@ -234,6 +260,7 @@ is open. Errors use a `{"error","detail"}` envelope.
 | `GET /export` | **whole store as one Markdown doc** (`?format=json` for a structured dump) |
 | `GET /ideas` | list ids, titles, tags |
 | `GET /ideas/{id}` | one idea + `links_out`/`links_in` (`?format=md`) |
+| `POST /search` | *(optional)* semantic GraphRAG: vector-seed + link-traverse → `{query, results, context}` |
 | `POST /ideas` | add one idea **and** its edges atomically → `{id, edges_created}` |
 | `PATCH /ideas/{id}` | partial update; only supplied fields change, `id` is immutable → the updated idea |
 | `DELETE /ideas/{id}` | delete one idea; its links cascade → `{deleted}` |

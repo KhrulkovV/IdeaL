@@ -4,6 +4,7 @@ All similarity/connection reasoning happens Claude-side. This server only stores
 atomic ideas and typed edges, and renders the whole store as one markdown doc.
 """
 import json
+import sys
 from contextlib import asynccontextmanager
 from typing import Optional
 
@@ -14,13 +15,39 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 import config
 import db
 import ids
+import rag_engine
 from export import render_json, render_markdown
-from models import IdeaCreate, IdeaUpdate, LinkCreate, LinkDelete
+from models import IdeaCreate, IdeaUpdate, LinkCreate, LinkDelete, SearchRequest
+
+# The optional server-side semantic index (see rag_engine.py). Built here so the
+# write endpoints can update it and /search can query it; warmed in `lifespan`.
+rag = rag_engine.RagEngine(
+    model_name=config.settings.rag_model,
+    enabled=config.settings.rag_enabled,
+)
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     db.init_schema()
+    if rag.enabled:
+        conn = db.connect()
+        try:
+            loaded = rag.load_persisted(conn)
+            embedded = rag.backfill(conn)
+            print(
+                f"[ideal.rag] semantic index ready: {loaded} loaded, {embedded} embedded "
+                f"(model {rag.model_name})",
+                file=sys.stderr,
+            )
+        except Exception as exc:  # noqa: BLE001 — degrade to no-search, don't crash boot
+            rag.enabled = False
+            print(
+                f"[ideal.rag] index init failed ({exc}); semantic search disabled",
+                file=sys.stderr,
+            )
+        finally:
+            conn.close()
     yield
 
 
@@ -169,6 +196,27 @@ def get_idea(idea_id: str, format: str = Query(default="json")):
     return _serialize_idea(row, links_out, links_in)
 
 
+@app.post("/search", dependencies=[Depends(auth_read)])
+def search(payload: SearchRequest):
+    """Semantic retrieval: embed the query, seed on vector similarity, then
+    traverse the Claude-authored links. Read-only — never writes."""
+    if not rag.enabled:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": "rag_disabled",
+                "detail": "semantic search is disabled on this server (IDEAL_RAG_ENABLED=false)",
+            },
+        )
+    conn = db.connect()
+    try:
+        return rag.search(
+            conn, payload.query, k=payload.k, start_k=payload.start_k, hops=payload.hops
+        )
+    finally:
+        conn.close()
+
+
 # --- writes ------------------------------------------------------------------
 
 @app.post("/ideas", status_code=201, dependencies=[Depends(auth_write)])
@@ -247,6 +295,9 @@ def create_idea(
         raise
     finally:
         conn.close()
+
+    # Embed-on-write: index the new idea (best-effort, after the store commit).
+    rag.index_idea(new_id, payload.title, payload.body)
 
     response.headers["Location"] = f"/ideas/{new_id}"
     return {
@@ -330,6 +381,11 @@ def update_idea(idea_id: str, payload: IdeaUpdate):
         raise
     finally:
         conn.close()
+
+    # Re-embed only when the embedded text actually changed (db already NULLed it).
+    if "title" in fields or "body" in fields:
+        rag.index_idea(idea_id, row["title"], row["body"])
+
     return _serialize_idea(row, links_out, links_in)
 
 
@@ -352,6 +408,8 @@ def delete_idea(idea_id: str):
         raise
     finally:
         conn.close()
+
+    rag.remove(idea_id)  # drop from the in-memory index (the BLOB is gone with the row)
     return {"deleted": idea_id}
 
 

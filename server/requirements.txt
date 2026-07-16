@@ -1,2 +1,6 @@
 fastapi>=0.110
 uvicorn[standard]>=0.29
+# Optional server-side semantic search (POST /search). Pulls a CPU torch wheel;
+# set IDEAL_RAG_ENABLED=false to run without it (the endpoint then returns 503).
+sentence-transformers>=2.2
+numpy>=1.24

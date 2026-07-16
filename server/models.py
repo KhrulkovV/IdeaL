@@ -74,3 +74,35 @@ class IdeaCreated(BaseModel):
     id: str
     edges_created: int
     edges_ignored: List[str] = Field(default_factory=list)
+
+
+# --- semantic search (optional server-side RAG) ------------------------------
+
+class SearchRequest(BaseModel):
+    query: str = Field(min_length=1)
+    k: int = Field(default=8, ge=1, le=100)        # max ideas returned
+    start_k: int = Field(default=4, ge=1, le=100)  # vector-similarity seeds
+    hops: int = Field(default=1, ge=0, le=5)       # link-traversal depth (0 = pure vector)
+
+    @field_validator("query")
+    @classmethod
+    def _non_empty(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("must not be empty")
+        return v
+
+
+class SearchHit(BaseModel):
+    id: str
+    title: str
+    depth: int                       # 0 = vector seed, >=1 = reached via that many link hops
+    score: Optional[float] = None    # cosine similarity for seeds; null for reached ideas
+    reason: str                      # human-readable provenance
+    tags: List[str] = Field(default_factory=list)
+
+
+class SearchResponse(BaseModel):
+    query: str
+    results: List[SearchHit]
+    context: str                     # ready-to-read markdown block of the retrieved ideas

@@ -14,7 +14,12 @@ CREATE TABLE IF NOT EXISTS ideas (
     status      TEXT,                      -- optional lifecycle (draft/active/archived), or NULL
     meta        TEXT,                      -- JSON blob for arbitrary future metadata, or NULL
     created_at  TEXT NOT NULL,             -- ISO-8601 UTC
-    updated_at  TEXT NOT NULL
+    updated_at  TEXT NOT NULL,
+    -- Optional server-side semantic index (see rag_engine.py). Nullable: NULL
+    -- means "not embedded yet" and is backfilled on startup / re-embedded on write.
+    embedding       BLOB,                  -- float32 vector bytes (L2-normalized)
+    embedding_model TEXT,                  -- model name that produced `embedding`
+    embedding_dim   INTEGER                -- vector length (sanity check on load)
 );
 
 CREATE TABLE IF NOT EXISTS links (

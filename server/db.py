@@ -27,6 +27,15 @@ def connect() -> sqlite3.Connection:
     return conn
 
 
+# Columns added after v1 shipped. `schema.sql` includes them for fresh DBs; an
+# existing store (e.g. the live VM) gets them via idempotent ALTER TABLE below.
+_MIGRATIONS = (
+    ("ideas", "embedding", "BLOB"),
+    ("ideas", "embedding_model", "TEXT"),
+    ("ideas", "embedding_dim", "INTEGER"),
+)
+
+
 def init_schema() -> None:
     directory = os.path.dirname(config.settings.db_path)
     if directory:
@@ -35,8 +44,16 @@ def init_schema() -> None:
     try:
         with open(_SCHEMA_PATH, "r", encoding="utf-8") as fh:
             conn.executescript(fh.read())
+        _apply_migrations(conn)
     finally:
         conn.close()
+
+
+def _apply_migrations(conn) -> None:
+    for table, column, decl in _MIGRATIONS:
+        existing = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+        if column not in existing:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
 
 
 # --- reads -------------------------------------------------------------------
@@ -88,6 +105,27 @@ def counts(conn):
     return ideas, links
 
 
+# --- embeddings (server-side RAG index) --------------------------------------
+
+def fetch_persisted_embeddings(conn):
+    """Every idea that already has a stored vector — used to warm the in-memory
+    index at startup without loading the model."""
+    return conn.execute(
+        "SELECT id, embedding, embedding_model, embedding_dim FROM ideas "
+        "WHERE embedding IS NOT NULL"
+    ).fetchall()
+
+
+def fetch_unembedded(conn, model: str):
+    """Ideas with no vector, or one from a different model — need (re)embedding."""
+    return conn.execute(
+        "SELECT id, title, body FROM ideas "
+        "WHERE embedding IS NULL OR embedding_model IS NOT ? "
+        "ORDER BY created_at ASC, id ASC",
+        (model,),
+    ).fetchall()
+
+
 # --- writes ------------------------------------------------------------------
 
 def insert_idea(conn, idea_id: str, fields: dict, when: str) -> None:
@@ -115,6 +153,14 @@ def insert_idea(conn, idea_id: str, fields: dict, when: str) -> None:
     )
 
 
+def set_embedding(conn, idea_id: str, blob: bytes, model: str, dim: int) -> None:
+    """Persist one idea's vector (raw float32 bytes) and the model that made it."""
+    conn.execute(
+        "UPDATE ideas SET embedding = ?, embedding_model = ?, embedding_dim = ? WHERE id = ?",
+        (blob, model, dim, idea_id),
+    )
+
+
 def insert_link(conn, source_id: str, target_id: str, type_: str, note: str, when: str) -> bool:
     """Insert an edge idempotently. Returns True if a new row was created."""
     cur = conn.execute(
@@ -138,7 +184,12 @@ def update_idea(conn, idea_id: str, fields: dict, when: str) -> bool:
     must be drawn from UPDATABLE_COLUMNS. Returns True if the idea existed."""
     cols = [c for c in fields if c in UPDATABLE_COLUMNS]
     assignments = [f"{c} = ?" for c in cols] + ["updated_at = ?"]
-    params = [fields[c] for c in cols] + [when, idea_id]
+    params = [fields[c] for c in cols] + [when]
+    # Invalidate the cached embedding when the embedded text (title/body) changes,
+    # so a failed re-embed leaves NULL (backfilled later) rather than a stale vector.
+    if "title" in cols or "body" in cols:
+        assignments += ["embedding = NULL", "embedding_model = NULL", "embedding_dim = NULL"]
+    params.append(idea_id)
     cur = conn.execute(
         f"UPDATE ideas SET {', '.join(assignments)} WHERE id = ?", params
     )

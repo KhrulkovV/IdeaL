@@ -23,4 +23,6 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 10s
+      # Generous first-boot window: with IDEAL_RAG_ENABLED=true the first start
+      # downloads the embedding model and backfills existing ideas before serving.
+      start_period: 300s

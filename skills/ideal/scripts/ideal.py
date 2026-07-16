@@ -10,6 +10,7 @@ Commands:
   update <id>            read a partial idea JSON from STDIN and PATCH it
   delete <id>            delete one idea (its links cascade)
   unlink <src> <tgt> <type>   delete one edge (type: similar|connected)
+  search <query> [--k --start-k --hops --json]   semantic GraphRAG search
   config --url --token --author   write client config (never prints the token)
 
 Config resolution (per key, first found wins):
@@ -225,6 +226,38 @@ def cmd_unlink(cfg, args):
     return 0
 
 
+def cmd_search(cfg, args):
+    _require_config(cfg)
+    body = {"query": args.query, "k": args.k, "start_k": args.start_k, "hops": args.hops}
+    status, text = _request(cfg, "POST", "/search", body=body)
+    if status == 503:
+        _die("semantic search is disabled on this server (set IDEAL_RAG_ENABLED=true).", 3)
+    if status != 200:
+        _die(f"search failed ({status}): {text}", 1)
+    data = json.loads(text)
+    if args.json:
+        print(json.dumps(data, indent=2, ensure_ascii=False))
+        return 0
+    results = data.get("results", [])
+    if not results:
+        print("(no matches)")
+        return 0
+    for h in results:
+        if h.get("depth", 0) == 0:
+            score = h.get("score")
+            tag = f"seed · {score:.3f}" if isinstance(score, (int, float)) else "seed"
+        else:
+            tag = f"reached · {h['depth']} hop out"
+        tags = ", ".join(h.get("tags") or [])
+        tag_part = f"  [{tags}]" if tags else ""
+        print(f"{h['id']}  —  {h['title']}  ({tag}){tag_part}")
+    ctx = data.get("context") or ""
+    if ctx:
+        print("\n--- context block ---\n")
+        _print_text(ctx)
+    return 0
+
+
 def cmd_config(_cfg, args):
     path = _config_path()
     directory = os.path.dirname(path)
@@ -275,6 +308,12 @@ def main(argv=None):
     p_unlink.add_argument("source")
     p_unlink.add_argument("target")
     p_unlink.add_argument("type", choices=["similar", "connected"])
+    p_search = sub.add_parser("search")
+    p_search.add_argument("query")
+    p_search.add_argument("--k", type=int, default=8)
+    p_search.add_argument("--start-k", type=int, default=4, dest="start_k")
+    p_search.add_argument("--hops", type=int, default=1)
+    p_search.add_argument("--json", action="store_true")
     p_config = sub.add_parser("config")
     p_config.add_argument("--url")
     p_config.add_argument("--token")
@@ -290,6 +329,7 @@ def main(argv=None):
         "update": cmd_update,
         "delete": cmd_delete,
         "unlink": cmd_unlink,
+        "search": cmd_search,
         "config": cmd_config,
     }
     return handlers[args.cmd](load_config(), args)

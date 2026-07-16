@@ -1,5 +1,12 @@
 # rag — GraphRAG retrieval over IdeaL (additive, read-only)
 
+> **The primary path is now the server.** The VM embeds each idea on write and answers
+> `POST /search` (via `ideal.py search` / `/ideal-search`) with **no ML deps on the client** — see
+> `docs/superpowers/specs/2026-07-16-server-side-rag-design.md`. This `rag/` package is the
+> **offline/local alternative**: same GraphRAG, but it re-embeds the whole store locally on each
+> run. Use it when you want to retrieve without the server doing the embedding, bring your own data,
+> or drop the raw LangChain retriever into another pipeline.
+
 Optional semantic retrieval layer. It **does not** change how ideas are written or linked — the
 core still exports the whole store as markdown for Claude to reason over. This is just a way to pull
 a relevant *sub-slice* by query instead of dumping everything into context.
