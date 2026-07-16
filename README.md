@@ -125,20 +125,31 @@ reboot without root, add a user crontab line: `@reboot cd /path/to/IdeaL && ./sc
 
 ### Redeploying after a code update
 
-Pull and rebuild in place — the SQLite volume and the model cache persist:
+Pull and restart in place — the SQLite file and the model cache persist:
 
 ```sh
 cd IdeaL && git pull
-./scripts/deploy.sh          # Docker: rebuilds the image (installs new deps), restarts
-# or, Python-direct:
-./scripts/run.sh stop && ./scripts/run.sh start   # re-installs deps into the active env
+
+# conda / Python-direct (no Docker):
+conda activate <your-env>
+./scripts/run.sh restart     # installs any new deps into the active env, then restarts
+
+# Docker (if you use it instead):
+./scripts/deploy.sh          # rebuilds the image (installs new deps), restarts
 ```
 
-The first boot with `IDEAL_RAG_ENABLED=true` downloads the embedding model (~90 MB, cached
-on `./data`) and backfills embeddings for every existing idea before serving — expect the
-health check to take up to a few minutes that once. Later restarts load the stored vectors
-instantly. Adding embeddings to a store that already has ideas is a one-time backfill; the
-schema migration (three nullable columns on `ideas`) is applied automatically and idempotently.
+On the conda path, `run.sh` now installs the semantic-search deps into your active env when
+`IDEAL_RAG_ENABLED` is true: it installs a **CPU torch wheel by default** (so the multi-GB CUDA
+build isn't pulled in) plus `sentence-transformers`/`numpy`. To change that: set
+`IDEAL_TORCH_INDEX_URL=<url>` (empty string = pip's default/GPU index), or pre-install torch
+yourself (`conda install pytorch cpuonly -c pytorch`) and the step is skipped. When
+`IDEAL_RAG_ENABLED=false`, no ML stack is installed at all.
+
+The first start with search enabled downloads the embedding model (~90 MB — cached under
+`~/.cache/huggingface` on the host, or `./data/hf-cache` under Docker) and backfills embeddings
+for every existing idea before serving, so that first boot can take a couple of minutes; later
+restarts load the stored vectors instantly. The schema migration (three nullable columns on
+`ideas`) is applied automatically and idempotently.
 
 ### Reaching the server from another machine
 

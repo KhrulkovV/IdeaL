@@ -47,6 +47,15 @@ load_env() {
   export IDEAL_PORT IDEAL_DB_PATH
 }
 
+# Is server-side semantic search enabled? Mirrors config.py's _as_bool over the
+# IDEAL_RAG_ENABLED value exported by load_env (default true).
+rag_enabled() {
+  case "$(printf '%s' "${IDEAL_RAG_ENABLED:-true}" | tr '[:upper:]' '[:lower:]')" in
+    1|true|yes|on) echo 1 ;;
+    *) echo 0 ;;
+  esac
+}
+
 ensure_deps() {
   if ! command -v "$PY" >/dev/null 2>&1 && [ ! -x "$PY" ]; then
     echo "ERROR: Python interpreter '$PY' not found. Activate your conda env, or set IDEAL_PYTHON." >&2
@@ -57,12 +66,39 @@ ensure_deps() {
     echo "NOTE: no conda env appears active; using system python3 ($PREFIX)." >&2
     echo "      Activate your env first, or set IDEAL_PYTHON, if that's not intended." >&2
   fi
-  if "$PY" -c 'import fastapi, uvicorn' >/dev/null 2>&1; then
-    echo "==> Using Python env: $PREFIX (deps present)"
-    return
+
+  if [ "$(rag_enabled)" = 1 ]; then
+    # Web + semantic-search deps.
+    if "$PY" -c 'import fastapi, uvicorn, sentence_transformers, numpy' >/dev/null 2>&1; then
+      echo "==> Using Python env: $PREFIX (deps present)"
+      return
+    fi
+    # Install torch FIRST so the huge default (CUDA) wheel isn't pulled in
+    # transitively by sentence-transformers. Default = CPU wheel; override with
+    # IDEAL_TORCH_INDEX_URL (empty string = pip's default/GPU index), or just
+    # pre-install torch via conda (e.g. `conda install pytorch cpuonly -c pytorch`)
+    # and this step is skipped.
+    if ! "$PY" -c 'import torch' >/dev/null 2>&1; then
+      idx="${IDEAL_TORCH_INDEX_URL-https://download.pytorch.org/whl/cpu}"
+      if [ -n "$idx" ]; then
+        echo "==> Installing CPU torch ($idx) into: $PREFIX"
+        "$PY" -m pip install torch --index-url "$idx"
+      else
+        echo "==> Installing torch (pip default index) into: $PREFIX"
+        "$PY" -m pip install torch
+      fi
+    fi
+    echo "==> Installing dependencies (incl. sentence-transformers) into: $PREFIX"
+    "$PY" -m pip install -r "$ROOT/server/requirements.txt"
+  else
+    # Web deps only — no ML stack when IDEAL_RAG_ENABLED is false.
+    if "$PY" -c 'import fastapi, uvicorn' >/dev/null 2>&1; then
+      echo "==> Using Python env: $PREFIX (deps present)"
+      return
+    fi
+    echo "==> Installing core dependencies into: $PREFIX"
+    "$PY" -m pip install fastapi "uvicorn[standard]"
   fi
-  echo "==> Installing dependencies into: $PREFIX"
-  "$PY" -m pip install -r "$ROOT/server/requirements.txt"
 }
 
 running() {
