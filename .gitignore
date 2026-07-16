@@ -2,6 +2,9 @@
 .env
 config.env
 
+# Claude Code local runtime state (not project files)
+.claude/
+
 # Runtime data (SQLite lives here on the host via the Docker volume)
 data/
 *.sqlite
