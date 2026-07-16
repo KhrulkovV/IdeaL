@@ -26,16 +26,21 @@ import ids
 
 logger = logging.getLogger("ideal.rag")
 
-DEFAULT_MODEL = "all-MiniLM-L6-v2"
+DEFAULT_MODEL = "Snowflake/snowflake-arctic-embed-s"
 
 
 def _text(title: str, body: str) -> str:
     return f"{title}\n\n{body}".strip()
 
 
-class MiniLMEmbedder:
+class SentenceTransformerEmbedder:
     """sentence-transformers wrapper. Encodes to L2-normalized float32 vectors so
-    cosine similarity is a plain dot product. Constructing it loads the model."""
+    cosine similarity is a plain dot product. Constructing it loads the model.
+
+    Asymmetric models (e.g. arctic-embed) sharpen retrieval by prefixing the query
+    side with a `query` prompt while embedding documents bare; `is_query=True`
+    applies that prompt when the loaded model declares one. Symmetric models (e.g.
+    MiniLM) declare no `query` prompt, so the flag is a no-op for them."""
 
     def __init__(self, model_name: str):
         from sentence_transformers import SentenceTransformer  # lazy: torch only here
@@ -44,13 +49,13 @@ class MiniLMEmbedder:
         self._model = SentenceTransformer(model_name)
         self.dim = int(self._model.get_sentence_embedding_dimension())
 
-    def encode(self, texts: List[str]) -> np.ndarray:
-        vecs = self._model.encode(
-            list(texts),
-            normalize_embeddings=True,
-            convert_to_numpy=True,
-            show_progress_bar=False,
+    def encode(self, texts: List[str], is_query: bool = False) -> np.ndarray:
+        kwargs = dict(
+            normalize_embeddings=True, convert_to_numpy=True, show_progress_bar=False
         )
+        if is_query and "query" in (self._model.prompts or {}):
+            kwargs["prompt_name"] = "query"
+        vecs = self._model.encode(list(texts), **kwargs)
         return np.asarray(vecs, dtype=np.float32)
 
 
@@ -60,7 +65,7 @@ class RagEngine:
     def __init__(self, model_name: str = DEFAULT_MODEL, enabled: bool = True):
         self.model_name = model_name
         self.enabled = enabled
-        self._embedder = None                    # MiniLMEmbedder or injected fake
+        self._embedder = None                    # SentenceTransformerEmbedder or injected fake
         self._dim: Optional[int] = None
         self._vecs: Dict[str, np.ndarray] = {}   # idea_id -> normalized float32 (dim,)
         self._lock = threading.Lock()            # guards _vecs + serializes re-index
@@ -74,7 +79,7 @@ class RagEngine:
 
     def _get_embedder(self):
         if self._embedder is None:
-            self._embedder = MiniLMEmbedder(self.model_name)
+            self._embedder = SentenceTransformerEmbedder(self.model_name)
             self._dim = self._embedder.dim
         return self._embedder
 
@@ -167,7 +172,7 @@ class RagEngine:
         if not items:
             return {"query": query, "results": [], "context": ""}
 
-        qvec = self._get_embedder().encode([query])[0].astype(np.float32)
+        qvec = self._get_embedder().encode([query], is_query=True)[0].astype(np.float32)
         ids_list = [idea_id for idea_id, _ in items]
         matrix = np.stack([vec for _, vec in items])           # (N, dim)
         sims = matrix @ qvec                                   # cosine (all normalized)

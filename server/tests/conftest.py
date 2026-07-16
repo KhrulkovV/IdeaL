@@ -38,7 +38,7 @@ _VOCAB = [
 class FakeEmbedder:
     dim = len(_VOCAB)
 
-    def encode(self, texts):
+    def encode(self, texts, is_query=False):  # symmetric fake: query flag is a no-op
         out = []
         for text in texts:
             tokens = "".join(c if c.isalnum() else " " for c in text.lower()).split()

@@ -40,12 +40,17 @@ re-embedded on next write-index or startup backfill. No content-hash column need
   - `index_idea(idea_id, title, body)` — embed one idea, persist the BLOB, update memory
     (called after create, and after an update that changed title/body).
   - `remove(idea_id)` — drop from memory (after delete; the row/BLOB is already gone).
-  - `search(conn, query, k, start_k, hops)` — embed query → cosine top-`start_k` seeds over the
-    in-memory matrix → BFS the links (both directions, from `db.fetch_all_links`) out `hops`, capped
-    at `k` → `{query, results:[{id,title,depth,score,reason,via}], context}` with a markdown block.
+  - `search(conn, query, k, start_k, hops)` — embed query (with `is_query=True`, so an asymmetric
+    model applies its `query` prompt on the search side while documents stay bare) → cosine
+    top-`start_k` seeds over the in-memory matrix → BFS the links (both directions, from
+    `db.fetch_all_links`) out `hops`, capped at `k` → `{query, results:[{id,title,depth,score,reason,via}],
+    context}` with a markdown block.
+  - `SentenceTransformerEmbedder.encode(texts, is_query=False)` — L2-normalized float32; `is_query`
+    selects the model's `query` prompt when it declares one (arctic-embed), and is a no-op for
+    symmetric models (MiniLM). Documents are always encoded bare.
 
 - **`server/config.py`** — `rag_enabled` (`IDEAL_RAG_ENABLED`, default true) and `rag_model`
-  (`IDEAL_RAG_MODEL`, default `all-MiniLM-L6-v2`).
+  (`IDEAL_RAG_MODEL`, default `Snowflake/snowflake-arctic-embed-s` — asymmetric, 384-dim).
 
 - **`server/db.py`** — `set_embedding`, `clear_embedding`, `fetch_persisted_embeddings`,
   `fetch_unembedded`; `update_idea` clears the embedding when title/body change.

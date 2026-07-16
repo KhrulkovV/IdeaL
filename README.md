@@ -145,11 +145,13 @@ build isn't pulled in) plus `sentence-transformers`/`numpy`. To change that: set
 yourself (`conda install pytorch cpuonly -c pytorch`) and the step is skipped. When
 `IDEAL_RAG_ENABLED=false`, no ML stack is installed at all.
 
-The first start with search enabled downloads the embedding model (~90 MB — cached under
-`~/.cache/huggingface` on the host, or `./data/hf-cache` under Docker) and backfills embeddings
+The first start with search enabled downloads the embedding model (arctic-embed-s, ~130 MB — cached
+under `~/.cache/huggingface` on the host, or `./data/hf-cache` under Docker) and backfills embeddings
 for every existing idea before serving, so that first boot can take a couple of minutes; later
-restarts load the stored vectors instantly. The schema migration (three nullable columns on
-`ideas`) is applied automatically and idempotently.
+restarts load the stored vectors instantly. **Changing `IDEAL_RAG_MODEL` triggers the same one-time
+re-embed** — stored vectors are keyed by the model that made them, so a different model's are ignored
+on load and rebuilt on that first boot (no manual migration). The schema migration (three nullable
+columns on `ideas`) is applied automatically and idempotently.
 
 ### Reaching the server from another machine
 
@@ -199,7 +201,7 @@ IDEAL_TOKEN=dev IDEAL_DB_PATH=./ideal.sqlite uvicorn app:app --reload
 | `IDEAL_PROTECT_READS` | `true` | Require the token on read endpoints too. |
 | `IDEAL_ON_UNKNOWN_TARGET` | `reject` | `reject` = refuse ideas linking to unknown targets; `ignore` = drop those edges. |
 | `IDEAL_RAG_ENABLED` | `true` | Server-side semantic search (`POST /search`). `false` = no model, `/search` returns 503. |
-| `IDEAL_RAG_MODEL` | `all-MiniLM-L6-v2` | sentence-transformers model for embeddings (changing it re-embeds on next boot). |
+| `IDEAL_RAG_MODEL` | `Snowflake/snowflake-arctic-embed-s` | sentence-transformers model for embeddings; asymmetric models get their `query` prompt on the search side only. Changing it re-embeds the store on next boot. |
 
 ---
 
