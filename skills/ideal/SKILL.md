@@ -5,21 +5,30 @@ description: >-
   ("add an idea", "save this to IdeaL", "capture this thought", "brain-dump",
   "store these notes"), on reading/querying it ("read the idea store",
   "browse IdeaL", "what has <author> been thinking about <topic>", "show idea
-  <id>", "what's stored about <X>"), on rating/endorsing ideas ("this idea is
-  very good", "that one's reliable/solid", "mark X as weak", "rate idea Y"), and
-  on editing or removing them ("update idea X", "fix that idea", "delete idea Y").
+  <id>", "what's stored about <X>", "find/search ideas about <X>"), on
+  rating/endorsing ideas ("this idea is very good", "that one's reliable/solid",
+  "mark X as weak", "rate idea Y"), and on editing or removing them ("update idea
+  X", "fix that idea", "delete idea Y").
   On ADD, split a brain-dump into atomic ideas, read the WHOLE store, and decide
   similar/connected links by reasoning — never by any keyword or similarity
-  algorithm. Claude is the search engine.
+  algorithm. An optional server-side semantic search (`ideal.py search`) can pull
+  a relevant slice for reads, but Claude remains the linker.
 ---
 
 # IdeaL — atomic idea store where you are the search engine
 
-IdeaL is a shared store of **atomic ideas** on a cloud VM. There is **no embedding,
-RAG, keyword scoring, or similarity algorithm anywhere** — not on the server, not in
-this skill. The server is a dumb SQLite store plus a markdown exporter. To find what
-is related, you fetch the **entire store as one markdown document** and **read it**.
-Your judgment is the only search engine.
+IdeaL is a shared store of **atomic ideas** on a cloud VM. **No algorithm decides how
+ideas relate**: you split brain-dumps into atoms and choose every `similar`/`connected`
+link by reasoning over the whole store — never by keyword or similarity score. That
+write/link path is the heart of the skill and has no algorithm in it. The default way
+to find what is related is still to fetch the **entire store as one markdown document**
+and **read it**; your judgment is the linker.
+
+For *retrieval only*, the server also offers an **optional** semantic search
+(`ideal.py search`, see Flow B) that embeds ideas and traverses your Claude-authored
+links to pull a relevant sub-slice. It is a convenience for large stores — read-only,
+and never a step in writing or linking. It can be turned off entirely at deploy time
+(`IDEAL_RAG_ENABLED=false`), in which case `search` reports that it is disabled.
 
 The helper CLI centralizes auth, config, and JSON. Always call it via its plugin path:
 
@@ -91,7 +100,8 @@ ideas skipped as duplicates.
 
 ## Flow B — READ (no writes, ever)
 
-For questions about what is stored, **never POST**. Use:
+For questions about what is stored, **never write** (no `add`, no `/links`, no
+`update`/`delete`). Use:
 - `python3 "$IDEAL" export` — whole-store questions (summarize, cluster, "what's stored
   about X", "what has <author> explored"). Read it and answer in prose, citing ids.
 - `python3 "$IDEAL" list` — a quick id/title/tags index.
@@ -104,6 +114,35 @@ surface an idea together with what it links to. Reading writes nothing — do no
 When the user asks for the "best", "most reliable", or "most useful" ideas, rank by
 the `reputation` / `usefulness` values shown in the export (higher = better). Ideas
 left at `—` are simply unrated, not bad — say so rather than treating them as low.
+
+### Optional: semantic search (`search`) — still read-only
+
+```
+python3 "$IDEAL" search "coarse space construction for algebraic multigrid"
+```
+It embeds the query, seeds by cosine similarity, then walks your `similar`/`connected`
+links out a hop to pull in related ideas — including ones whose own text didn't match,
+because the edges are your reasoning. Output is a ranked list plus a ready-to-read
+markdown context block. Flags: `--k` (max results), `--start-k` (vector seeds),
+`--hops` (link-traversal depth), `--json` (raw `{query, results, context}`).
+
+**When to reach for `search` vs. `export` — the whole export is the default.**
+
+| Use `search` (a focused slice) | Dump the whole store via `export` (read it all) |
+|---|---|
+| The store is **large** and a full dump would blow or crowd the context window | **Deep / thorough research** — synthesis, "map everything about X", surveys |
+| A quick, targeted lookup — "is there anything on <topic>?", "find the idea about Y" | **Any ADD flow** — dedup + link decisions need the *whole* store, always |
+| You want to save context and a relevant sub-slice is enough | You need completeness and can afford the tokens |
+
+When in doubt, prefer `export` — the ranked slice is a convenience that trades
+completeness for context, and it can miss a relevant idea a full read would catch.
+
+`search` is a **retrieval convenience, not a replacement for reading**:
+- It is **read-only** — like everything in Flow B, it never writes, and it never
+  decides links. Choosing `similar`/`connected` edges is always the ADD flow: your
+  reasoning over the full `export`, never this ranking.
+- If the server was deployed with `IDEAL_RAG_ENABLED=false`, `search` prints a clear
+  "semantic search disabled" message; fall back to `export` / `list` / `get`.
 
 ---
 
