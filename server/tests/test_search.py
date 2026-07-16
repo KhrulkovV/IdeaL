@@ -171,6 +171,90 @@ def test_index_idea_embeds_current_committed_text(client, auth):
     assert hit["id"] == iid and hit["score"] > 0
 
 
+class _SpyEmbedder:
+    """Records the is_query flag of every encode call so a test can assert that
+    documents are embedded bare while queries carry the query flag."""
+
+    dim = 4
+
+    def __init__(self):
+        self.calls = []  # list of (is_query, [texts])
+
+    def encode(self, texts, is_query=False):
+        texts = list(texts)
+        self.calls.append((is_query, texts))
+        vecs = np.ones((len(texts), self.dim), dtype=np.float32)
+        return vecs / np.linalg.norm(vecs, axis=1, keepdims=True)
+
+
+def test_query_encoded_as_query_documents_encoded_bare():
+    """Retrieval must encode the QUERY with is_query=True while the write-path /
+    backfill encodes stay bare. An asymmetric model (e.g. arctic-embed) needs its
+    query prompt only on the query side; without this wiring it embeds queries as
+    documents and silently regresses. Symmetric models ignore the flag, so this
+    locks the contract in regardless of which model is configured."""
+    conn = db.connect()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        db.insert_idea(conn, "spy-1", {"title": "Firewall", "body": FIREWALL_BODY}, db.now_iso())
+        conn.execute("COMMIT")
+    finally:
+        conn.close()
+
+    engine = rag_engine.RagEngine(model_name="spy")
+    engine.set_embedder(_SpyEmbedder())
+    spy = engine._embedder
+
+    conn = db.connect()
+    try:
+        engine.backfill(conn)                     # document encode
+        engine.search(conn, "firewall port")      # query encode
+    finally:
+        conn.close()
+
+    query_flags = [is_q for is_q, texts in spy.calls if "firewall port" in texts]
+    assert query_flags == [True], "the search query was not encoded with is_query=True"
+    doc_flags = [is_q for is_q, texts in spy.calls if any(FIREWALL_BODY in t for t in texts)]
+    assert doc_flags and all(f is False for f in doc_flags), "documents must be embedded bare"
+
+
+class _StubModel:
+    """A SentenceTransformer stand-in that records which prompt each encode used."""
+
+    def __init__(self, prompts):
+        self.prompts = prompts
+        self.seen_prompt = []
+
+    def encode(self, texts, **kwargs):
+        self.seen_prompt.append(kwargs.get("prompt_name"))
+        return np.zeros((len(list(texts)), 3), dtype=np.float32)
+
+    def get_sentence_embedding_dimension(self):
+        return 3
+
+
+def _embedder_with(prompts):
+    emb = object.__new__(rag_engine.SentenceTransformerEmbedder)
+    emb.model_name = "stub"
+    emb._model = _StubModel(prompts)
+    emb.dim = 3
+    return emb
+
+
+def test_embedder_applies_query_prompt_only_for_queries_when_model_defines_one():
+    emb = _embedder_with({"query": "Represent this sentence for searching relevant passages: "})
+    emb.encode(["a document"], is_query=False)
+    emb.encode(["a query"], is_query=True)
+    assert emb._model.seen_prompt == [None, "query"]
+
+
+def test_embedder_ignores_query_flag_when_model_has_no_query_prompt():
+    emb = _embedder_with({})  # MiniLM-style symmetric model: no query prompt to apply
+    emb.encode(["a document"], is_query=False)
+    emb.encode(["a query"], is_query=True)
+    assert emb._model.seen_prompt == [None, None]
+
+
 def test_load_persisted_skips_dim_mismatched_blob():
     """A persisted BLOB whose byte length disagrees with its stored embedding_dim
     is quarantined, not adopted — otherwise a corrupt row could set the whole

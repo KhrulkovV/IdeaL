@@ -34,7 +34,8 @@ def load() -> Settings:
     if on_unknown not in ("reject", "ignore"):
         on_unknown = "reject"
 
-    rag_model = os.environ.get("IDEAL_RAG_MODEL", "all-MiniLM-L6-v2").strip() or "all-MiniLM-L6-v2"
+    _default_model = "Snowflake/snowflake-arctic-embed-s"
+    rag_model = os.environ.get("IDEAL_RAG_MODEL", _default_model).strip() or _default_model
 
     return Settings(
         token=token,
