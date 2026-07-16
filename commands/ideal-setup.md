@@ -25,10 +25,12 @@ Steps:
    ```
    Omit `--author` if the user did not give one.
 
-3. Verify connectivity:
+3. Verify connectivity **and** the token. Use an auth-gated endpoint — `list` — not
+   `health` (health is unauthenticated, so it passes even with a wrong token):
    ```
-   python3 "$CLAUDE_PLUGIN_ROOT/skills/ideal/scripts/ideal.py" health
+   python3 "$CLAUDE_PLUGIN_ROOT/skills/ideal/scripts/ideal.py" list
    ```
-   On `OK …`, confirm setup is complete and the store is reachable. If it fails, report
-   the error plainly (unreachable URL vs. bad token) and suggest the fix — do **not**
-   print the token in either case.
+   A listing (or `(store is empty)`) means the URL **and** token are good — confirm setup
+   is complete. A `401` means the token is wrong; a connection error means the URL is
+   unreachable. Report which one plainly and suggest the fix — do **not** print the token
+   in either case.

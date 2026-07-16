@@ -35,6 +35,7 @@ def _meta_line(idea) -> str:
     return (
         f"`{idea['id']}` · {_or_dash(idea['author'])} · "
         f"tags: {_tags_str(idea['tags'])} · "
+        f"status: {_or_dash(idea['status'])} · "
         f"task: {_or_dash(idea['task'])} · "
         f"usefulness: {_or_dash(idea['usefulness'])} · "
         f"reputation: {_or_dash(idea['reputation'])} · "

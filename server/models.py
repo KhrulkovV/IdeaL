@@ -18,8 +18,8 @@ class IdeaCreate(BaseModel):
     author: Optional[str] = None
     tags: List[str] = Field(default_factory=list)
     task: Optional[str] = None
-    usefulness: Optional[int] = None
-    reputation: Optional[int] = None
+    usefulness: Optional[int] = Field(default=None, ge=0, le=100)
+    reputation: Optional[int] = Field(default=None, ge=0, le=100)
     status: Optional[str] = None
     meta: Optional[Dict[str, Any]] = None
     edges: List[EdgeIn] = Field(default_factory=list)
@@ -42,8 +42,8 @@ class IdeaUpdate(BaseModel):
     author: Optional[str] = None
     tags: Optional[List[str]] = None
     task: Optional[str] = None
-    usefulness: Optional[int] = None
-    reputation: Optional[int] = None
+    usefulness: Optional[int] = Field(default=None, ge=0, le=100)
+    reputation: Optional[int] = Field(default=None, ge=0, le=100)
     status: Optional[str] = None
     meta: Optional[Dict[str, Any]] = None
 

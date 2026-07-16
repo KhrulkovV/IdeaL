@@ -116,6 +116,32 @@ def test_link_endpoint_is_idempotent(client, auth):
     assert second.status_code == 201 and second.json()["created"] is False
 
 
+# --- score bounds ------------------------------------------------------------
+
+def test_out_of_range_score_rejected_on_create(client, auth):
+    r = client.post(
+        "/ideas",
+        json={"title": "Scored", "body": "x", "reputation": 101},
+        headers=auth,
+    )
+    assert r.status_code == 422
+
+
+def test_out_of_range_score_rejected_on_update(client, auth):
+    iid = client.post("/ideas", json={"title": "S", "body": "x"}, headers=auth).json()["id"]
+    r = client.patch(f"/ideas/{iid}", json={"usefulness": -1}, headers=auth)
+    assert r.status_code == 422
+
+
+def test_in_range_score_accepted(client, auth):
+    iid = client.post(
+        "/ideas", json={"title": "S2", "body": "x", "usefulness": 0, "reputation": 100},
+        headers=auth,
+    ).json()["id"]
+    view = client.get(f"/ideas/{iid}", headers=auth).json()
+    assert view["usefulness"] == 0 and view["reputation"] == 100
+
+
 # --- ids ---------------------------------------------------------------------
 
 def test_duplicate_titles_get_numeric_suffix(client, auth):
@@ -154,7 +180,7 @@ def test_render_markdown_line_format():
     ideas = [{
         "id": "a", "title": "A", "body": "Body A", "author": "alice",
         "tags": "x,y", "task": None, "usefulness": None, "reputation": None,
-        "status": None, "created_at": "2026-07-15T00:00:00Z",
+        "status": "draft", "created_at": "2026-07-15T00:00:00Z",
         "updated_at": "2026-07-15T00:00:00Z",
     }]
     links = [{"source_id": "a", "target_id": "b", "type": "similar", "note": "dup"}]
@@ -164,4 +190,5 @@ def test_render_markdown_line_format():
     assert "link_count: 1" in md
     assert "## A" in md
     assert "`a` · alice · tags: x, y" in md
+    assert "status: draft" in md  # lifecycle status is visible in the read surface
     assert "- **similar** → [[b]] — dup" in md

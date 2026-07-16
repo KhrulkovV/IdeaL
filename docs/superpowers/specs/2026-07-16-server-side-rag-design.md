@@ -64,8 +64,9 @@ re-embedded on next write-index or startup backfill. No content-hash column need
   command → `POST /search`. Readers need only Python stdlib — the whole point of moving the engine
   server-side.
 - **`commands/ideal-search.md`** repoints to `ideal.py search`.
-- **`rag/`** (client engine) stays as an offline/local alternative; its README notes the server
-  endpoint is now the default path.
+- The old client-side **`rag/`** package was **removed** once the server endpoint became the only
+  retrieval path — no consumer imported it, so it was dead weight. See the superseded design in
+  `2026-07-16-graphrag-retrieval-design.md`.
 
 ## Deploy
 

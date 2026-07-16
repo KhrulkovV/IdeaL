@@ -1,5 +1,10 @@
 # IdeaL — GraphRAG retrieval layer (additive, canonical LangChain component)
 
+> **⚠️ Superseded / removed.** This describes the *client-side* `rag/` package, which has been
+> **removed**. Retrieval now runs **server-side**: the server embeds each idea on write and answers
+> `POST /search`, so clients need only Python stdlib. See `2026-07-16-server-side-rag-design.md` for
+> the shipped design. This document is retained for historical context only.
+
 ## Intent & the constraint it bends
 
 IdeaL was built **without** embeddings/RAG on purpose: the store is dumb, and Claude reads the

@@ -42,9 +42,10 @@ load_env() {
     export "$key=$val"
   done < "$ROOT/.env"
   : "${IDEAL_PORT:=8000}"
+  : "${IDEAL_HOST:=0.0.0.0}"
   # On the host (no container), keep SQLite inside the repo's data/ dir, not /data.
   IDEAL_DB_PATH="$DATA_DIR/ideal.sqlite"
-  export IDEAL_PORT IDEAL_DB_PATH
+  export IDEAL_PORT IDEAL_HOST IDEAL_DB_PATH
 }
 
 # Is server-side semantic search enabled? Mirrors config.py's _as_bool over the
@@ -91,13 +92,14 @@ ensure_deps() {
     echo "==> Installing dependencies (incl. sentence-transformers) into: $PREFIX"
     "$PY" -m pip install -r "$ROOT/server/requirements.txt"
   else
-    # Web deps only — no ML stack when IDEAL_RAG_ENABLED is false.
-    if "$PY" -c 'import fastapi, uvicorn' >/dev/null 2>&1; then
+    # Web deps only — no heavy ML stack when IDEAL_RAG_ENABLED is false. numpy is
+    # still required: app.py imports rag_engine (which imports numpy) unconditionally.
+    if "$PY" -c 'import fastapi, uvicorn, numpy' >/dev/null 2>&1; then
       echo "==> Using Python env: $PREFIX (deps present)"
       return
     fi
     echo "==> Installing core dependencies into: $PREFIX"
-    "$PY" -m pip install fastapi "uvicorn[standard]"
+    "$PY" -m pip install fastapi "uvicorn[standard]" numpy
   fi
 }
 
@@ -117,10 +119,10 @@ start() {
     exit 0
   fi
   ensure_deps
-  echo "==> Starting IdeaL on 0.0.0.0:${IDEAL_PORT} (no Docker, no root)..."
+  echo "==> Starting IdeaL on ${IDEAL_HOST}:${IDEAL_PORT} (no Docker, no root)..."
   # uvicorn imports app.py from server/; IDEAL_DB_PATH is absolute so cwd is safe.
   cd "$ROOT/server"
-  nohup "$PY" -m uvicorn app:app --host 0.0.0.0 --port "$IDEAL_PORT" \
+  nohup "$PY" -m uvicorn app:app --host "$IDEAL_HOST" --port "$IDEAL_PORT" \
     >"$LOG_FILE" 2>&1 &
   echo $! > "$PID_FILE"
   cd "$ROOT"

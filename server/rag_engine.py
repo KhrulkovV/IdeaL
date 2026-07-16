@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 from collections import deque
 from typing import Dict, List, Optional, Tuple
 
@@ -62,6 +63,7 @@ class RagEngine:
         self._embedder = None                    # MiniLMEmbedder or injected fake
         self._dim: Optional[int] = None
         self._vecs: Dict[str, np.ndarray] = {}   # idea_id -> normalized float32 (dim,)
+        self._lock = threading.Lock()            # guards _vecs + serializes re-index
 
     # -- embedder management --------------------------------------------------
 
@@ -94,6 +96,13 @@ class RagEngine:
             if row["embedding_model"] != self.model_name:
                 continue
             vec = np.frombuffer(row["embedding"], dtype=np.float32)
+            stored_dim = row["embedding_dim"]
+            if stored_dim is not None and vec.shape[0] != stored_dim:
+                logger.warning(
+                    "skipping idea %s: embedding bytes imply dim %d but row records %d",
+                    row["id"], vec.shape[0], stored_dim,
+                )
+                continue
             if self._dim is not None and vec.shape[0] != self._dim:
                 continue
             self._vecs[row["id"]] = vec
@@ -118,36 +127,49 @@ class RagEngine:
 
     # -- write-path hooks (called after the core transaction commits) ---------
 
-    def index_idea(self, idea_id: str, title: str, body: str) -> None:
-        """Embed one idea, persist its vector, and update the index. Best-effort:
-        never raises into the write path — a failure just leaves the idea
-        unembedded (backfilled on next boot)."""
+    def index_idea(self, idea_id: str) -> None:
+        """(Re)embed one idea from its CURRENT committed DB text, persist the vector,
+        and publish it to the index. Re-reading under the lock means a slow re-embed
+        that lands after a newer concurrent update still writes the newest committed
+        text's vector — the index can't drift out of sync with the row. Best-effort:
+        never raises into the write path, and never leaves a text-mismatched vector."""
         if not self.enabled:
             return
-        try:
-            vec = self._encode_one(title, body)
-            conn = db.connect()
+        with self._lock:
             try:
-                db.set_embedding(conn, idea_id, vec.tobytes(), self.model_name, int(vec.shape[0]))
-            finally:
-                conn.close()
-            self._vecs[idea_id] = vec
-        except Exception as exc:  # noqa: BLE001 — the store write already succeeded
-            logger.warning("failed to index idea %s: %s", idea_id, exc)
+                conn = db.connect()
+                try:
+                    row = db.fetch_idea(conn, idea_id)
+                    if row is None:  # deleted between commit and index — nothing to embed
+                        self._vecs.pop(idea_id, None)
+                        return
+                    vec = self._encode_one(row["title"], row["body"])
+                    db.set_embedding(
+                        conn, idea_id, vec.tobytes(), self.model_name, int(vec.shape[0])
+                    )
+                finally:
+                    conn.close()
+                self._vecs[idea_id] = vec
+            except Exception as exc:  # noqa: BLE001 — the store write already succeeded
+                self._vecs.pop(idea_id, None)  # drop rather than serve stale text
+                logger.warning("failed to index idea %s: %s", idea_id, exc)
 
     def remove(self, idea_id: str) -> None:
-        self._vecs.pop(idea_id, None)
+        with self._lock:
+            self._vecs.pop(idea_id, None)
 
     # -- retrieval ------------------------------------------------------------
 
     def search(self, conn, query: str, k: int = 8, start_k: int = 4, hops: int = 1) -> dict:
         """Vector-seed then traverse links. Returns {query, results, context}."""
-        if not self._vecs:
+        with self._lock:  # snapshot so a concurrent remove/index can't mutate mid-read
+            items = list(self._vecs.items())
+        if not items:
             return {"query": query, "results": [], "context": ""}
 
         qvec = self._get_embedder().encode([query])[0].astype(np.float32)
-        ids_list = list(self._vecs.keys())
-        matrix = np.stack([self._vecs[i] for i in ids_list])   # (N, dim)
+        ids_list = [idea_id for idea_id, _ in items]
+        matrix = np.stack([vec for _, vec in items])           # (N, dim)
         sims = matrix @ qvec                                   # cosine (all normalized)
 
         order = np.argsort(-sims)[: max(1, start_k)]

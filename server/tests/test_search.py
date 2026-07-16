@@ -5,8 +5,11 @@ Vocabulary the fake understands (see conftest): a "firewall/port/service" cluste
 and a disjoint "coarse/algebraic/multigrid" cluster, so a query in one cluster
 scores ~0 on ideas from the other.
 """
+import numpy as np
+
 import app as app_module
 import db
+import rag_engine
 
 FIREWALL_BODY = "open a port through the firewall to reach the service"
 MULTIGRID_BODY = "coarse space near null algebraic multigrid"
@@ -143,3 +146,51 @@ def test_disabled_returns_503(client, auth):
     r = client.post("/search", json={"query": "firewall"}, headers=auth)
     assert r.status_code == 503
     assert r.json()["error"] == "rag_disabled"
+
+
+def test_index_idea_embeds_current_committed_text(client, auth):
+    """index_idea re-reads the idea's CURRENT committed text from the DB rather
+    than trusting stale caller-supplied text — so a persisted/warm vector can never
+    drift out of sync with the row (regression: a slow concurrent PATCH's re-embed
+    landing last would otherwise leave the older text's vector on the newer row)."""
+    iid = _add(client, auth, "Note", MULTIGRID_BODY)
+    # Commit a new body directly, bypassing the endpoint's own re-embed path.
+    conn = db.connect()
+    try:
+        conn.execute("UPDATE ideas SET body = ? WHERE id = ?", (FIREWALL_BODY, iid))
+    finally:
+        conn.close()
+
+    app_module.rag.index_idea(iid)  # id only: must embed the firewall text now in the DB
+
+    hit = client.post(
+        "/search",
+        json={"query": "firewall port service", "start_k": 1, "hops": 0},
+        headers=auth,
+    ).json()["results"][0]
+    assert hit["id"] == iid and hit["score"] > 0
+
+
+def test_load_persisted_skips_dim_mismatched_blob():
+    """A persisted BLOB whose byte length disagrees with its stored embedding_dim
+    is quarantined, not adopted — otherwise a corrupt row could set the whole
+    index's dimension and 500 every subsequent query."""
+    iid = "corrupt-vector"
+    conn = db.connect()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        db.insert_idea(conn, iid, {"title": "Corrupt", "body": "x"}, db.now_iso())
+        bad_blob = np.zeros(3, dtype=np.float32).tobytes()  # 3 floats...
+        db.set_embedding(conn, iid, bad_blob, rag_engine.DEFAULT_MODEL, 27)  # ...claims dim 27
+        conn.execute("COMMIT")
+    finally:
+        conn.close()
+
+    engine = rag_engine.RagEngine(model_name=rag_engine.DEFAULT_MODEL)  # no embedder → dim unset
+    conn = db.connect()
+    try:
+        loaded = engine.load_persisted(conn)
+    finally:
+        conn.close()
+    assert loaded == 0
+    assert iid not in engine._vecs
